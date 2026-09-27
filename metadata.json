@@ -1,0 +1,6 @@
+{
+  "name": "DocuFlow Console",
+  "description": "High-performance document console and reader for PDF, Excel spreadsheets, and executive documentation with precision annotations and analytics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

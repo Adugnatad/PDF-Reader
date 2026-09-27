@@ -1,0 +1,35 @@
+{
+  "expo": {
+    "name": "DocuFlow",
+    "slug": "docuflow-console",
+    "version": "1.0.0",
+    "scheme": "docuflow",
+    "orientation": "portrait",
+    "icon": "./public/assets/aistudio/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "backgroundColor": "#0b1326"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0b1326"
+      }
+    },
+    "web": {
+      "favicon": "./public/assets/aistudio/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

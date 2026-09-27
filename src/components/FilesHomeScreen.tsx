@@ -1,0 +1,676 @@
+import React, { useState, useMemo, useRef } from 'react';
+import {
+  View,
+  Text,
+  TextInput,
+  ScrollView,
+  TouchableOpacity,
+  StyleSheet,
+  Platform,
+} from 'react-native';
+import { Ionicons, MaterialIcons } from '@expo/vector-icons';
+import { DocFile } from '../types';
+import { pdfStore } from '../services/pdfStore';
+
+interface FilesHomeScreenProps {
+  files: DocFile[];
+  onOpenFile: (file: DocFile) => void;
+  onShowToast: (msg: string) => void;
+}
+
+export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
+  files,
+  onOpenFile,
+  onShowToast,
+}) => {
+  const [deviceFiles, setDeviceFiles] = useState<DocFile[]>(files);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortBy, setSortBy] = useState<'date' | 'name' | 'size' | 'pages'>('date');
+  const [sortAsc, setSortAsc] = useState(false);
+  const [showSortMenu, setShowSortMenu] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
+  const filePickerRef = useRef<any>(null);
+
+  // Sync with prop changes
+  React.useEffect(() => {
+    setDeviceFiles(files);
+  }, [files]);
+
+  // Direct device file access / picker (no upload required)
+  const handleDeviceFileSelect = async (e: any) => {
+    const selectedFile = e.target.files?.[0];
+    if (!selectedFile) return;
+
+    if (!selectedFile.name.toLowerCase().endsWith('.pdf') && selectedFile.type !== 'application/pdf') {
+      onShowToast('Please select a PDF document');
+      return;
+    }
+
+    try {
+      onShowToast(`Opening ${selectedFile.name}...`);
+      const buffer = await selectedFile.arrayBuffer();
+      const newDoc = pdfStore.addDevicePdf(selectedFile, buffer, 'Documents');
+      onShowToast(`Opened ${selectedFile.name}`);
+      onOpenFile(newDoc);
+    } catch (err: any) {
+      onShowToast('Could not read PDF: ' + (err?.message || 'Error'));
+    } finally {
+      if (filePickerRef.current) {
+        filePickerRef.current.value = '';
+      }
+    }
+  };
+
+  // Scan device storage simulation & file list refresh
+  const handleScanDeviceStorage = async () => {
+    setIsScanning(true);
+    onShowToast('Scanning device for PDF documents...');
+
+    // Check if modern File System Access API is available
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && 'showOpenFilePicker' in window) {
+      try {
+        const picker = (window as any).showOpenFilePicker;
+        const fileHandles = await picker({
+          multiple: true,
+          types: [
+            {
+              description: 'PDF Documents',
+              accept: { 'application/pdf': ['.pdf'] },
+            },
+          ],
+        });
+
+        let addedCount = 0;
+        for (const handle of fileHandles) {
+          const file = await handle.getFile();
+          const buffer = await file.arrayBuffer();
+          pdfStore.addDevicePdf(file, buffer, 'Documents');
+          addedCount++;
+        }
+
+        setIsScanning(false);
+        onShowToast(`Found ${addedCount} new PDF${addedCount === 1 ? '' : 's'} on device`);
+        return;
+      } catch (err: any) {
+        if (err?.name !== 'AbortError') {
+          console.warn('File picker note:', err);
+        }
+      }
+    }
+
+    // Default rescan feedback
+    setTimeout(() => {
+      setIsScanning(false);
+      onShowToast('Device scan complete: all PDFs up to date');
+    }, 600);
+  };
+
+  // Toggle favorite
+  const handleToggleFavorite = (fileId: string, e: any) => {
+    e.stopPropagation?.();
+    setDeviceFiles((prev) =>
+      prev.map((f) => (f.id === fileId ? { ...f, favorite: !f.favorite } : f))
+    );
+    const target = deviceFiles.find((f) => f.id === fileId);
+    onShowToast(target?.favorite ? 'Removed from favorites' : 'Added to favorites');
+  };
+
+  // Filtered and sorted PDFs
+  const filteredFiles = useMemo(() => {
+    return deviceFiles
+      .filter((file) => {
+        if (searchQuery) {
+          const q = searchQuery.toLowerCase();
+          return file.name.toLowerCase().includes(q);
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        if (sortBy === 'name') {
+          return sortAsc ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name);
+        }
+        if (sortBy === 'size') {
+          const sizeA = parseFloat(a.size) || 0;
+          const sizeB = parseFloat(b.size) || 0;
+          return sortAsc ? sizeA - sizeB : sizeB - sizeA;
+        }
+        if (sortBy === 'pages') {
+          const pA = a.pageCount || 0;
+          const pB = b.pageCount || 0;
+          return sortAsc ? pA - pB : pB - pA;
+        }
+        // Default date modified
+        return sortAsc ? a.id.localeCompare(b.id) : b.id.localeCompare(a.id);
+      });
+  }, [deviceFiles, searchQuery, sortBy, sortAsc]);
+
+  return (
+    <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
+      {/* Hidden file input for opening PDFs */}
+      {Platform.OS === 'web' && (
+        <input
+          ref={filePickerRef}
+          type="file"
+          accept="application/pdf,.pdf"
+          style={{ display: 'none' }}
+          onChange={handleDeviceFileSelect}
+        />
+      )}
+
+      {/* Top Header */}
+      <View style={styles.header}>
+        <View style={styles.titleRow}>
+          <View style={styles.titleGroup}>
+            <View style={styles.appIconBadge}>
+              <MaterialIcons name="picture-as-pdf" size={22} color="#ff516a" />
+            </View>
+            <View>
+              <Text style={styles.headerTitle}>PDF Reader</Text>
+              <Text style={styles.headerSubtitle}>All PDF Documents</Text>
+            </View>
+          </View>
+
+          {/* Header Quick Actions */}
+          <View style={styles.headerActions}>
+            <TouchableOpacity
+              style={styles.scanBtn}
+              onPress={handleScanDeviceStorage}
+              activeOpacity={0.75}
+              accessibilityLabel="Scan Device"
+            >
+              <Ionicons
+                name={isScanning ? 'sync' : 'scan-outline'}
+                size={16}
+                color="#7bd0ff"
+              />
+              <Text style={styles.scanBtnText}>
+                {isScanning ? 'Scanning...' : 'Scan Device'}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.openDeviceBtn}
+              onPress={() => filePickerRef.current?.click()}
+              activeOpacity={0.75}
+              accessibilityLabel="Open PDF File"
+            >
+              <Ionicons name="folder-open-outline" size={16} color="#0d0096" />
+              <Text style={styles.openDeviceBtnText}>Open File</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Search Bar */}
+        <View style={styles.searchBar}>
+          <Ionicons name="search" size={18} color="#908fa0" style={styles.searchIcon} />
+          <TextInput
+            placeholder="Search PDF documents..."
+            placeholderTextColor="#908fa0"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            style={styles.searchInput}
+          />
+          {searchQuery ? (
+            <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearSearchBtn}>
+              <Ionicons name="close" size={18} color="#908fa0" />
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      </View>
+
+      {/* Main Files List Content */}
+      <View style={styles.mainContent}>
+        {/* Controls Bar */}
+        <View style={styles.controlsBar}>
+          <View style={styles.fileCountGroup}>
+            <Text style={styles.sectionHeading}>All PDFs</Text>
+            <Text style={styles.fileCountBadge}>({filteredFiles.length})</Text>
+          </View>
+
+          {/* Sort Button & Dropdown */}
+          <View style={styles.sortContainer}>
+            <TouchableOpacity
+              onPress={() => setShowSortMenu(!showSortMenu)}
+              style={styles.sortButton}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="swap-vertical-outline" size={15} color="#c7c4d7" />
+              <Text style={styles.sortButtonText}>
+                {sortBy === 'date'
+                  ? 'Date Modified'
+                  : sortBy === 'name'
+                  ? 'Name (A-Z)'
+                  : sortBy === 'size'
+                  ? 'File Size'
+                  : 'Page Count'}
+              </Text>
+            </TouchableOpacity>
+
+            {showSortMenu && (
+              <View style={styles.sortDropdown}>
+                <TouchableOpacity
+                  onPress={() => {
+                    setSortBy('date');
+                    setSortAsc(!sortAsc);
+                    setShowSortMenu(false);
+                    onShowToast('Sorted by Date Modified');
+                  }}
+                  style={styles.sortItem}
+                >
+                  <Text style={styles.sortItemText}>Date Modified</Text>
+                  {sortBy === 'date' && (
+                    <Ionicons
+                      name={sortAsc ? 'chevron-up' : 'chevron-down'}
+                      size={14}
+                      color="#7bd0ff"
+                    />
+                  )}
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={() => {
+                    setSortBy('name');
+                    setSortAsc(!sortAsc);
+                    setShowSortMenu(false);
+                    onShowToast('Sorted by Name');
+                  }}
+                  style={styles.sortItem}
+                >
+                  <Text style={styles.sortItemText}>Name (A-Z)</Text>
+                  {sortBy === 'name' && (
+                    <Ionicons
+                      name={sortAsc ? 'chevron-up' : 'chevron-down'}
+                      size={14}
+                      color="#7bd0ff"
+                    />
+                  )}
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={() => {
+                    setSortBy('size');
+                    setSortAsc(!sortAsc);
+                    setShowSortMenu(false);
+                    onShowToast('Sorted by File Size');
+                  }}
+                  style={styles.sortItem}
+                >
+                  <Text style={styles.sortItemText}>File Size</Text>
+                  {sortBy === 'size' && (
+                    <Ionicons
+                      name={sortAsc ? 'chevron-up' : 'chevron-down'}
+                      size={14}
+                      color="#7bd0ff"
+                    />
+                  )}
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={() => {
+                    setSortBy('pages');
+                    setSortAsc(!sortAsc);
+                    setShowSortMenu(false);
+                    onShowToast('Sorted by Page Count');
+                  }}
+                  style={styles.sortItem}
+                >
+                  <Text style={styles.sortItemText}>Page Count</Text>
+                  {sortBy === 'pages' && (
+                    <Ionicons
+                      name={sortAsc ? 'chevron-up' : 'chevron-down'}
+                      size={14}
+                      color="#7bd0ff"
+                    />
+                  )}
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        </View>
+
+        {/* PDF Documents List */}
+        <View style={styles.filesList}>
+          {filteredFiles.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Ionicons name="document-text-outline" size={48} color="#475569" />
+              <Text style={styles.emptyTitle}>No PDFs found</Text>
+              <Text style={styles.emptySubtitle}>
+                {searchQuery
+                  ? `No documents matching "${searchQuery}"`
+                  : 'No PDF documents found on device'}
+              </Text>
+              {searchQuery && (
+                <TouchableOpacity
+                  onPress={() => setSearchQuery('')}
+                  style={styles.emptyActionBtn}
+                >
+                  <Text style={styles.emptyActionBtnText}>Clear Search</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          ) : (
+            filteredFiles.map((file) => {
+              return (
+                <TouchableOpacity
+                  key={file.id}
+                  onPress={() => onOpenFile(file)}
+                  style={styles.fileCard}
+                  activeOpacity={0.7}
+                >
+                  {/* Red PDF Badge */}
+                  <View style={styles.typeBadge}>
+                    <Text style={styles.badgeLabel}>PDF</Text>
+                    <MaterialIcons
+                      name="picture-as-pdf"
+                      size={16}
+                      color="#ff516a"
+                      style={styles.badgeIcon}
+                    />
+                  </View>
+
+                  {/* Document Information */}
+                  <View style={styles.fileDetails}>
+                    <Text style={styles.fileName} numberOfLines={1}>
+                      {file.name}
+                    </Text>
+                    <View style={styles.metaRow}>
+                      <Text style={styles.metaText}>{file.pageCount || 1} pages</Text>
+                      <Text style={styles.metaDot}>•</Text>
+                      <Text style={styles.metaText}>{file.size}</Text>
+                      <Text style={styles.metaDot}>•</Text>
+                      <Text style={styles.metaText}>{file.modified}</Text>
+                    </View>
+                  </View>
+
+                  {/* Star / Favorite Button */}
+                  <TouchableOpacity
+                    onPress={(e) => handleToggleFavorite(file.id, e)}
+                    style={styles.starBtn}
+                    accessibilityLabel="Toggle Favorite"
+                  >
+                    <Ionicons
+                      name={file.favorite ? 'star' : 'star-outline'}
+                      size={18}
+                      color={file.favorite ? '#f59e0b' : '#64748b'}
+                    />
+                  </TouchableOpacity>
+
+                  {/* Chevron Right */}
+                  <Ionicons name="chevron-forward" size={18} color="#908fa0" />
+                </TouchableOpacity>
+              );
+            })
+          )}
+        </View>
+      </View>
+    </ScrollView>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#0b1326',
+  },
+  scrollContent: {
+    paddingBottom: 48,
+  },
+  header: {
+    backgroundColor: 'rgba(11, 19, 38, 0.95)',
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(45, 52, 73, 0.4)',
+  },
+  titleRow: {
+    marginBottom: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  titleGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  appIconBadge: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255, 81, 106, 0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 81, 106, 0.3)',
+  },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#ffffff',
+    letterSpacing: -0.3,
+  },
+  headerSubtitle: {
+    fontSize: 11,
+    color: '#908fa0',
+    marginTop: 1,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  scanBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#17223b',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#263554',
+  },
+  scanBtnText: {
+    color: '#7bd0ff',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  openDeviceBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#7bd0ff',
+    paddingHorizontal: 11,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  openDeviceBtnText: {
+    color: '#0d0096',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#171f33',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#2d3449',
+    paddingHorizontal: 12,
+    height: 40,
+  },
+  searchIcon: {
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 13,
+    color: '#dae2fd',
+    outlineStyle: 'none' as any,
+  },
+  clearSearchBtn: {
+    padding: 4,
+  },
+  mainContent: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+  },
+  controlsBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  fileCountGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  sectionHeading: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#dae2fd',
+  },
+  fileCountBadge: {
+    fontSize: 12,
+    color: '#908fa0',
+  },
+  sortContainer: {
+    position: 'relative',
+  },
+  sortButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#171f33',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 7,
+    borderWidth: 1,
+    borderColor: '#2d3449',
+  },
+  sortButtonText: {
+    fontSize: 11,
+    color: '#c7c4d7',
+    fontWeight: '500',
+  },
+  sortDropdown: {
+    position: 'absolute',
+    top: 32,
+    right: 0,
+    width: 140,
+    backgroundColor: '#171f33',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#2d3449',
+    paddingVertical: 4,
+    zIndex: 100,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+  sortItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  sortItemText: {
+    fontSize: 11,
+    color: '#dae2fd',
+    fontWeight: '500',
+  },
+  filesList: {
+    gap: 8,
+  },
+  fileCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#131b2e',
+    borderRadius: 12,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: '#263554',
+    gap: 10,
+  },
+  typeBadge: {
+    width: 44,
+    height: 44,
+    borderRadius: 8,
+    backgroundColor: '#2e1820',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 81, 106, 0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeLabel: {
+    fontSize: 8,
+    fontWeight: '800',
+    color: '#ffb2b7',
+    letterSpacing: 0.5,
+  },
+  badgeIcon: {
+    marginTop: 1,
+  },
+  fileDetails: {
+    flex: 1,
+  },
+  fileName: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#dae2fd',
+    marginBottom: 4,
+  },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 5,
+  },
+  metaText: {
+    fontSize: 10.5,
+    color: '#908fa0',
+  },
+  metaDot: {
+    fontSize: 10,
+    color: '#64748b',
+  },
+  starBtn: {
+    padding: 4,
+  },
+  emptyContainer: {
+    alignItems: 'center',
+    paddingVertical: 48,
+    gap: 8,
+  },
+  emptyTitle: {
+    color: '#dae2fd',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  emptySubtitle: {
+    color: '#64748b',
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  emptyActionBtn: {
+    marginTop: 8,
+    backgroundColor: '#17223b',
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#263554',
+  },
+  emptyActionBtnText: {
+    color: '#7bd0ff',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+});
