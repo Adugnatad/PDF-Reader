@@ -17,6 +17,8 @@ import { pdfStore } from '../services/pdfStore';
 import { pdfjsLib } from '../services/pdfService';
 import { ViewModeModal } from './ViewModeModal';
 import { pickPdfFromDevice } from '../services/nativeFilePicker';
+import { NativePdfView } from './NativePdfView';
+import { openInNativeSystemViewer } from '../services/nativePdfOpener';
 
 interface PdfReaderScreenProps {
   onBack: () => void;
@@ -508,7 +510,20 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
     }
   };
 
-  // 10. Download Current PDF
+  // 10. Open in Native System Viewer (Apple QuickLook / Android System PDF Reader)
+  const handleOpenSystemViewer = async () => {
+    if (!pdfBytes) {
+      onShowToast('PDF data not ready');
+      return;
+    }
+    onShowToast('Opening in system viewer...');
+    const ok = await openInNativeSystemViewer(pdfBytes, activeTitle);
+    if (!ok && Platform.OS === 'web') {
+      onShowToast('Opened PDF in new browser tab');
+    }
+  };
+
+  // 11. Download Current PDF
   const handleDownload = () => {
     if (!pdfBytes) {
       onShowToast('PDF data not ready');
@@ -648,6 +663,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
         onBack={onBack}
         onShowToast={onShowToast}
         onOpenFileFromDevice={handlePickAnotherPdf}
+        onOpenSystemViewer={handleOpenSystemViewer}
       />
 
       {/* Main Document Content */}
@@ -805,82 +821,19 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                     }
                   : {})}
               >
-                {/* PDF Page Canvas (Web) or Native Document Sheet (iOS/Android) */}
-                {Platform.OS === 'web' ? (
-                  <canvas ref={canvasRef} style={{ display: 'block', maxWidth: '100%' }} />
-                ) : (
-                  <View
-                    style={[
-                      styles.nativeDocPage,
-                      {
-                        backgroundColor: t.paperBg,
-                        borderColor: t.border,
-                        transform: [{ scale: zoom }],
-                      },
-                    ]}
-                  >
-                    {/* Top Page Header */}
-                    <View style={styles.nativeDocPageHeader}>
-                      <View style={styles.nativeDocHeaderLeft}>
-                        <Ionicons name="document-text" size={14} color="#7bd0ff" />
-                        <Text style={[styles.nativeDocHeaderTitle, { color: t.muted }]} numberOfLines={1}>
-                          {activeTitle}
-                        </Text>
-                      </View>
-                      <View style={styles.nativeDocBadge}>
-                        <Text style={styles.nativeDocBadgeText}>P. {currentPage} / {numPages}</Text>
-                      </View>
-                    </View>
-
-                    {/* Document Content Body */}
-                    <View style={styles.nativeDocBody}>
-                      {reflowParagraphs && reflowParagraphs.length > 0 ? (
-                        reflowParagraphs.map((para, idx) => {
-                          const isHeader =
-                            idx === 0 ||
-                            (para.length < 60 &&
-                              (para === para.toUpperCase() ||
-                                para.includes('Ledger') ||
-                                para.includes('Report') ||
-                                para.includes('Section') ||
-                                para.includes('SCHEDULE') ||
-                                para.includes('AGREEMENT')));
-
-                          return (
-                            <Text
-                              key={idx}
-                              style={[
-                                isHeader ? styles.nativeDocHeading : styles.nativeDocParagraph,
-                                {
-                                  color: isHeader ? t.text : t.muted,
-                                },
-                              ]}
-                            >
-                              {para}
-                            </Text>
-                          );
-                        })
-                      ) : (
-                        <View style={styles.nativeDocEmpty}>
-                          <ActivityIndicator size="small" color="#7bd0ff" />
-                          <Text style={[styles.nativeDocParagraph, { color: t.muted, marginTop: 8 }]}>
-                            Rendering document page...
-                          </Text>
-                        </View>
-                      )}
-                    </View>
-
-                    {/* Page Bottom Seal & Audit Bar */}
-                    <View style={styles.nativeDocFooter}>
-                      <Text style={[styles.nativeDocFooterText, { color: t.muted }]}>
-                        DOCUMENT VERIFIED • 256-BIT ENCRYPTION
-                      </Text>
-                      <Text style={[styles.nativeDocFooterText, { color: t.muted }]}>
-                        PAGE {currentPage}
-                      </Text>
-                    </View>
-                  </View>
-                )}
+                {/* Visual PDF Document View: Web Canvas or Direct Native Embedded Viewer */}
+                <NativePdfView
+                  canvasRef={canvasRef}
+                  drawCanvasRef={drawCanvasRef}
+                  activeTool={activeTool}
+                  pdfBytes={pdfBytes}
+                  fileName={activeTitle}
+                  currentPage={currentPage}
+                  numPages={numPages}
+                  zoom={zoom}
+                  themeColors={t}
+                  onOpenSystemViewer={handleOpenSystemViewer}
+                />
 
                 {/* Freehand Drawing Overlay Canvas */}
                 {Platform.OS === 'web' && (
@@ -1012,10 +965,17 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                       />
                     ) : (
                       <View style={styles.nativePdfFallbackCard}>
-                        <Ionicons name="document-text" size={26} color="#7bd0ff" />
-                        <Text style={[styles.nativePdfFallbackSubtitle, { color: t.muted }]}>
+                        <Ionicons name="document-text" size={32} color="#7bd0ff" />
+                        <Text style={[styles.nativePdfFallbackSubtitle, { color: t.text, fontWeight: '700' }]}>
                           Page {p} of {numPages}
                         </Text>
+                        <TouchableOpacity
+                          style={styles.nativeContinuousBtn}
+                          onPress={handleOpenSystemViewer}
+                        >
+                          <Ionicons name="open-outline" size={14} color="#0d0096" />
+                          <Text style={styles.nativeContinuousBtnText}>Open with System Viewer</Text>
+                        </TouchableOpacity>
                       </View>
                     )}
                   </View>
@@ -1049,10 +1009,17 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                       />
                     ) : (
                       <View style={styles.nativePdfFallbackCard}>
-                        <Ionicons name="document-text" size={26} color="#7bd0ff" />
-                        <Text style={[styles.nativePdfFallbackSubtitle, { color: t.muted }]}>
+                        <Ionicons name="document-text" size={32} color="#7bd0ff" />
+                        <Text style={[styles.nativePdfFallbackSubtitle, { color: t.text, fontWeight: '700' }]}>
                           Page {p} of {numPages}
                         </Text>
+                        <TouchableOpacity
+                          style={styles.nativeContinuousBtn}
+                          onPress={handleOpenSystemViewer}
+                        >
+                          <Ionicons name="open-outline" size={14} color="#0d0096" />
+                          <Text style={styles.nativeContinuousBtnText}>Open with System Viewer</Text>
+                        </TouchableOpacity>
                       </View>
                     )}
                   </View>
@@ -2084,5 +2051,20 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: '700',
     letterSpacing: 0.8,
+  },
+  nativeContinuousBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#7bd0ff',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 6,
+    marginTop: 8,
+  },
+  nativeContinuousBtnText: {
+    color: '#0d0096',
+    fontSize: 12,
+    fontWeight: '700',
   },
 });

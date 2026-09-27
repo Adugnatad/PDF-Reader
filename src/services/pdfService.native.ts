@@ -127,18 +127,48 @@ export const pdfjsLib = {
         throw new Error('Unsupported PDF data source format');
       }
 
-      // Load with pdf-lib (pure JS, 100% native mobile compatible)
-      const pdfDoc = await PDFDocument.load(uint8, { ignoreEncryption: true });
-      const numPages = pdfDoc.getPageCount();
+      // Resilient PDF document loading (pure JS, 100% native mobile compatible)
+      let pdfDoc: any = null;
+      let numPages = 1;
+      try {
+        pdfDoc = await PDFDocument.load(uint8, { ignoreEncryption: true });
+        numPages = pdfDoc.getPageCount() || 1;
+      } catch (loadErr) {
+        console.warn('pdf-lib load notice (proceeding with direct native view):', loadErr);
+        // Fallback: estimate page count from PDF stream structure
+        try {
+          const latin = new TextDecoder('latin1').decode(uint8.slice(0, Math.min(uint8.length, 60000)));
+          const countMatch = latin.match(/\/Count\s+(\d+)/);
+          if (countMatch) {
+            numPages = Math.max(1, parseInt(countMatch[1], 10));
+          } else {
+            const pageMatches = latin.match(/\/Type\s*\/Page\b/g);
+            numPages = pageMatches ? Math.max(1, pageMatches.length) : 1;
+          }
+        } catch {
+          numPages = 1;
+        }
+      }
 
       return {
         numPages,
         async getPage(pageNumber: number) {
           const pageIndex = Math.max(0, Math.min(numPages - 1, pageNumber - 1));
-          const page = pdfDoc.getPage(pageIndex);
-          const width = page.getWidth() || 595;
-          const height = page.getHeight() || 842;
-          const rotationAngle = (page.getRotation() && page.getRotation().angle) || 0;
+          let page: any = null;
+          let width = 595;
+          let height = 842;
+          let rotationAngle = 0;
+
+          if (pdfDoc) {
+            try {
+              page = pdfDoc.getPage(pageIndex);
+              width = page.getWidth() || 595;
+              height = page.getHeight() || 842;
+              rotationAngle = (page.getRotation() && page.getRotation().angle) || 0;
+            } catch (pErr) {
+              console.warn('Page dimension notice:', pErr);
+            }
+          }
 
           return {
             pageNumber,
@@ -156,22 +186,24 @@ export const pdfjsLib = {
             async getTextContent() {
               const allItems: Array<{ str: string; transform?: number[] }> = [];
 
-              try {
-                const contents = (page as any).node.Contents();
-                if (contents) {
-                  const refs = contents.asArray ? contents.asArray() : [contents];
-                  for (const ref of refs) {
-                    const streamObj = (pdfDoc as any).context.lookup(ref);
-                    if (streamObj && typeof streamObj.getContents === 'function') {
-                      const streamBytes = streamObj.getContents();
-                      if (streamBytes && streamBytes.length > 0) {
-                        allItems.push(...extractTextFromStream(streamBytes));
+              if (page && pdfDoc) {
+                try {
+                  const contents = page.node?.Contents ? page.node.Contents() : null;
+                  if (contents) {
+                    const refs = contents.asArray ? contents.asArray() : [contents];
+                    for (const ref of refs) {
+                      const streamObj = pdfDoc.context.lookup(ref);
+                      if (streamObj && typeof streamObj.getContents === 'function') {
+                        const streamBytes = streamObj.getContents();
+                        if (streamBytes && streamBytes.length > 0) {
+                          allItems.push(...extractTextFromStream(streamBytes));
+                        }
                       }
                     }
                   }
+                } catch (err) {
+                  // Text extraction is non-blocking and optional
                 }
-              } catch (err) {
-                console.warn(`Native text extract notice for page ${pageNumber}:`, err);
               }
 
               return {

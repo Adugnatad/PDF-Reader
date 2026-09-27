@@ -8,6 +8,7 @@ interface HeaderProps {
   showBack?: boolean;
   onShowToast: (msg: string) => void;
   onOpenFileFromDevice?: () => void;
+  onOpenSystemViewer?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -16,6 +17,7 @@ export const Header: React.FC<HeaderProps> = ({
   showBack = true,
   onShowToast,
   onOpenFileFromDevice,
+  onOpenSystemViewer,
 }) => {
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -40,7 +42,19 @@ export const Header: React.FC<HeaderProps> = ({
         </View>
 
         <View style={styles.rightGroup}>
-          {onOpenFileFromDevice && (
+          {onOpenSystemViewer && (
+            <TouchableOpacity
+              accessibilityLabel="Open in System Viewer"
+              onPress={onOpenSystemViewer}
+              style={styles.openHeaderBtn}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="open-outline" size={15} color="#7bd0ff" />
+              <Text style={styles.openHeaderBtnText}>System Viewer</Text>
+            </TouchableOpacity>
+          )}
+
+          {onOpenFileFromDevice && !onOpenSystemViewer && (
             <TouchableOpacity
               accessibilityLabel="Open document from device"
               onPress={onOpenFileFromDevice}
@@ -63,6 +77,20 @@ export const Header: React.FC<HeaderProps> = ({
 
           {menuOpen && (
             <View style={styles.dropdownMenu}>
+              {onOpenSystemViewer && (
+                <TouchableOpacity
+                  onPress={() => {
+                    setMenuOpen(false);
+                    onOpenSystemViewer();
+                  }}
+                  style={styles.dropdownItem}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="open-outline" size={16} color="#7bd0ff" />
+                  <Text style={styles.dropdownText}>Open in System Reader</Text>
+                </TouchableOpacity>
+              )}
+
               {onOpenFileFromDevice && (
                 <TouchableOpacity
                   onPress={() => {
