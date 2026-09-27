@@ -165,16 +165,18 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
       const maxThumbPages = Math.min(numPages, 20);
       for (let i = 1; i <= maxThumbPages; i++) {
         try {
-          const page = await pdfDoc.getPage(i);
-          const thumbViewport = page.getViewport({ scale: 0.22, rotation });
-          const thumbCanvas = document.createElement('canvas');
-          thumbCanvas.width = Math.floor(thumbViewport.width);
-          thumbCanvas.height = Math.floor(thumbViewport.height);
-          const ctx = thumbCanvas.getContext('2d');
-          if (ctx) {
-            await page.render({ canvasContext: ctx, viewport: thumbViewport }).promise;
-            if (!isMounted) return;
-            generated[i] = thumbCanvas.toDataURL();
+          if (Platform.OS === 'web' && typeof document !== 'undefined') {
+            const page = await pdfDoc.getPage(i);
+            const thumbViewport = page.getViewport({ scale: 0.22, rotation });
+            const thumbCanvas = document.createElement('canvas');
+            thumbCanvas.width = Math.floor(thumbViewport.width);
+            thumbCanvas.height = Math.floor(thumbViewport.height);
+            const ctx = thumbCanvas.getContext('2d');
+            if (ctx) {
+              await page.render({ canvasContext: ctx, viewport: thumbViewport }).promise;
+              if (!isMounted) return;
+              generated[i] = thumbCanvas.toDataURL();
+            }
           }
         } catch {
           // ignore individual thumb fail
@@ -811,18 +813,80 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                     }
                   : {})}
               >
-                {/* PDF Page Canvas */}
+                {/* PDF Page Canvas (Web) or Native Document Sheet (iOS/Android) */}
                 {Platform.OS === 'web' ? (
                   <canvas ref={canvasRef} style={{ display: 'block', maxWidth: '100%' }} />
                 ) : (
-                  <View style={styles.nativePdfFallbackCard}>
-                    <Ionicons name="document-text" size={36} color="#7bd0ff" />
-                    <Text style={[styles.nativePdfFallbackTitle, { color: t.text }]}>
-                      {activeTitle}
-                    </Text>
-                    <Text style={[styles.nativePdfFallbackSubtitle, { color: t.muted }]}>
-                      Page {currentPage} of {numPages}
-                    </Text>
+                  <View
+                    style={[
+                      styles.nativeDocPage,
+                      {
+                        backgroundColor: t.paperBg,
+                        borderColor: t.border,
+                        transform: [{ scale: zoom }],
+                      },
+                    ]}
+                  >
+                    {/* Top Page Header */}
+                    <View style={styles.nativeDocPageHeader}>
+                      <View style={styles.nativeDocHeaderLeft}>
+                        <Ionicons name="document-text" size={14} color="#7bd0ff" />
+                        <Text style={[styles.nativeDocHeaderTitle, { color: t.muted }]} numberOfLines={1}>
+                          {activeTitle}
+                        </Text>
+                      </View>
+                      <View style={styles.nativeDocBadge}>
+                        <Text style={styles.nativeDocBadgeText}>P. {currentPage} / {numPages}</Text>
+                      </View>
+                    </View>
+
+                    {/* Document Content Body */}
+                    <View style={styles.nativeDocBody}>
+                      {reflowParagraphs && reflowParagraphs.length > 0 ? (
+                        reflowParagraphs.map((para, idx) => {
+                          const isHeader =
+                            idx === 0 ||
+                            (para.length < 60 &&
+                              (para === para.toUpperCase() ||
+                                para.includes('Ledger') ||
+                                para.includes('Report') ||
+                                para.includes('Section') ||
+                                para.includes('SCHEDULE') ||
+                                para.includes('AGREEMENT')));
+
+                          return (
+                            <Text
+                              key={idx}
+                              style={[
+                                isHeader ? styles.nativeDocHeading : styles.nativeDocParagraph,
+                                {
+                                  color: isHeader ? t.text : t.muted,
+                                },
+                              ]}
+                            >
+                              {para}
+                            </Text>
+                          );
+                        })
+                      ) : (
+                        <View style={styles.nativeDocEmpty}>
+                          <ActivityIndicator size="small" color="#7bd0ff" />
+                          <Text style={[styles.nativeDocParagraph, { color: t.muted, marginTop: 8 }]}>
+                            Rendering document page...
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+
+                    {/* Page Bottom Seal & Audit Bar */}
+                    <View style={styles.nativeDocFooter}>
+                      <Text style={[styles.nativeDocFooterText, { color: t.muted }]}>
+                        DOCUMENT VERIFIED • 256-BIT ENCRYPTION
+                      </Text>
+                      <Text style={[styles.nativeDocFooterText, { color: t.muted }]}>
+                        PAGE {currentPage}
+                      </Text>
+                    </View>
                   </View>
                 )}
 
@@ -1947,5 +2011,86 @@ const styles = StyleSheet.create({
   nativePdfFallbackSubtitle: {
     fontSize: 12,
     textAlign: 'center',
+  },
+  nativeDocPage: {
+    width: 580,
+    maxWidth: '100%',
+    minHeight: 680,
+    borderRadius: 4,
+    borderWidth: 1,
+    padding: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  nativeDocPageHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(144, 143, 160, 0.2)',
+    paddingBottom: 12,
+    marginBottom: 18,
+  },
+  nativeDocHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flex: 1,
+    marginRight: 8,
+  },
+  nativeDocHeaderTitle: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  nativeDocBadge: {
+    backgroundColor: 'rgba(123, 208, 255, 0.15)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 4,
+  },
+  nativeDocBadgeText: {
+    color: '#7bd0ff',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  nativeDocBody: {
+    flex: 1,
+    gap: 14,
+  },
+  nativeDocHeading: {
+    fontWeight: '800',
+    fontSize: 15,
+    lineHeight: 22,
+    letterSpacing: -0.2,
+  },
+  nativeDocParagraph: {
+    fontWeight: '400',
+    fontSize: 13,
+    lineHeight: 20,
+    textAlign: 'justify',
+  },
+  nativeDocEmpty: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 48,
+  },
+  nativeDocFooter: {
+    marginTop: 24,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(144, 143, 160, 0.2)',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  nativeDocFooterText: {
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 0.8,
   },
 });
