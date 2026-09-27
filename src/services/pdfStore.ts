@@ -1,4 +1,5 @@
 import { DocFile } from '../types';
+import { INITIAL_FILES } from '../data/mockData';
 import {
   generateTaxFilingPdf,
   generateContractPdf,
@@ -122,7 +123,11 @@ class PdfStoreService {
     return docFile;
   }
 
-  public addUploadedPdf(file: File, buffer: ArrayBuffer, pageCount?: number): DocFile {
+  public addUploadedPdf(
+    file: { name: string; size: number },
+    buffer: ArrayBuffer,
+    pageCount?: number
+  ): DocFile {
     return this.addDevicePdf(file, buffer, 'Downloads');
   }
 
@@ -134,6 +139,10 @@ class PdfStoreService {
 
   public getUserFiles(): DocFile[] {
     return this.userFiles;
+  }
+
+  public getAllFiles(): DocFile[] {
+    return [...this.userFiles, ...INITIAL_FILES];
   }
 
   /**

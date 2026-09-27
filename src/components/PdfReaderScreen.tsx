@@ -16,6 +16,7 @@ import { ReaderTheme } from '../types';
 import { pdfStore } from '../services/pdfStore';
 import { pdfjsLib } from '../services/pdfService';
 import { ViewModeModal } from './ViewModeModal';
+import { pickPdfFromDevice } from '../services/nativeFilePicker';
 
 interface PdfReaderScreenProps {
   onBack: () => void;
@@ -487,22 +488,23 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
     onShowToast(`Match ${prevIdx + 1} of ${searchResults.length} (Page ${searchResults[prevIdx].page})`);
   };
 
-  // 9. Open Another PDF / File Picker
-  const handleOpenAnotherPdf = async (e: any) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
+  // 9. Open Another PDF from Native Device Storage or Web
+  const handlePickAnotherPdf = async () => {
     try {
-      onShowToast(`Opening ${file.name}...`);
-      const buffer = await file.arrayBuffer();
-      const newDoc = pdfStore.addUploadedPdf(file, buffer);
+      const picked = await pickPdfFromDevice();
+      if (!picked) return;
+
+      onShowToast(`Opening ${picked.name}...`);
+      const newDoc = pdfStore.addUploadedPdf(
+        { name: picked.name, size: picked.size },
+        picked.buffer
+      );
       setActiveId(newDoc.id);
       setActiveTitle(newDoc.name);
-      onShowToast(`Opened ${file.name}`);
+      setLoadError(null);
+      onShowToast(`Opened ${picked.name}`);
     } catch (err: any) {
       onShowToast('Error loading PDF: ' + (err?.message || 'Failed'));
-    } finally {
-      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
@@ -640,25 +642,13 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
 
   return (
     <View style={styles.container}>
-      {/* Hidden file input for opening any real PDF file */}
-      {Platform.OS === 'web' && (
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="application/pdf,.pdf"
-          style={{ display: 'none' }}
-          onChange={handleOpenAnotherPdf}
-        />
-      )}
-
       {/* Top Header */}
       <Header
         title={activeTitle}
         onBack={onBack}
         onShowToast={onShowToast}
+        onOpenFileFromDevice={handlePickAnotherPdf}
       />
-
-   
 
       {/* Main Document Content */}
       <ScrollView
@@ -681,10 +671,12 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
             <Text style={styles.errorTitle}>Unable to read this PDF</Text>
             <Text style={styles.errorSubtitle}>{loadError}</Text>
             <TouchableOpacity
-              onPress={() => fileInputRef.current?.click()}
+              onPress={handlePickAnotherPdf}
               style={styles.retryBtn}
+              activeOpacity={0.8}
             >
-              <Text style={styles.retryBtnText}>Choose Another PDF File</Text>
+              <Ionicons name="folder-open-outline" size={16} color="#ffffff" style={{ marginRight: 6 }} />
+              <Text style={styles.retryBtnText}>Choose Another PDF from Device</Text>
             </TouchableOpacity>
           </View>
         )}

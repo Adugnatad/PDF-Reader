@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { DocFile } from '../types';
 import { pdfStore } from '../services/pdfStore';
+import { pickPdfFromDevice, scanDeviceStorage } from '../services/nativeFilePicker';
 
 interface FilesHomeScreenProps {
   files: DocFile[];
@@ -29,80 +30,58 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
   const [sortAsc, setSortAsc] = useState(false);
   const [showSortMenu, setShowSortMenu] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
-  const filePickerRef = useRef<any>(null);
 
   // Sync with prop changes
   React.useEffect(() => {
     setDeviceFiles(files);
   }, [files]);
 
-  // Direct device file access / picker (no upload required)
-  const handleDeviceFileSelect = async (e: any) => {
-    const selectedFile = e.target.files?.[0];
-    if (!selectedFile) return;
-
-    if (!selectedFile.name.toLowerCase().endsWith('.pdf') && selectedFile.type !== 'application/pdf') {
-      onShowToast('Please select a PDF document');
-      return;
-    }
-
+  // Load PDF file from device (iOS / Android / Web)
+  const handleOpenDeviceFile = async () => {
     try {
-      onShowToast(`Opening ${selectedFile.name}...`);
-      const buffer = await selectedFile.arrayBuffer();
-      const newDoc = pdfStore.addDevicePdf(selectedFile, buffer, 'Documents');
-      onShowToast(`Opened ${selectedFile.name}`);
+      const picked = await pickPdfFromDevice();
+      if (!picked) return;
+
+      onShowToast(`Opening ${picked.name}...`);
+      const newDoc = pdfStore.addDevicePdf(
+        { name: picked.name, size: picked.size },
+        picked.buffer,
+        'Documents'
+      );
+      setDeviceFiles(pdfStore.getAllFiles());
+      onShowToast(`Opened ${picked.name}`);
       onOpenFile(newDoc);
     } catch (err: any) {
-      onShowToast('Could not read PDF: ' + (err?.message || 'Error'));
-    } finally {
-      if (filePickerRef.current) {
-        filePickerRef.current.value = '';
-      }
+      onShowToast('Could not load PDF: ' + (err?.message || 'Error'));
     }
   };
 
-  // Scan device storage simulation & file list refresh
+  // Scan device storage / multiple file picker (iOS / Android / Web)
   const handleScanDeviceStorage = async () => {
     setIsScanning(true);
     onShowToast('Scanning device for PDF documents...');
 
-    // Check if modern File System Access API is available
-    if (Platform.OS === 'web' && typeof window !== 'undefined' && 'showOpenFilePicker' in window) {
-      try {
-        const picker = (window as any).showOpenFilePicker;
-        const fileHandles = await picker({
-          multiple: true,
-          types: [
-            {
-              description: 'PDF Documents',
-              accept: { 'application/pdf': ['.pdf'] },
-            },
-          ],
-        });
-
-        let addedCount = 0;
-        for (const handle of fileHandles) {
-          const file = await handle.getFile();
-          const buffer = await file.arrayBuffer();
-          pdfStore.addDevicePdf(file, buffer, 'Documents');
-          addedCount++;
+    try {
+      const scanned = await scanDeviceStorage();
+      if (scanned && scanned.length > 0) {
+        for (const item of scanned) {
+          pdfStore.addDevicePdf(
+            { name: item.name, size: item.size },
+            item.buffer,
+            'Documents'
+          );
         }
-
-        setIsScanning(false);
-        onShowToast(`Found ${addedCount} new PDF${addedCount === 1 ? '' : 's'} on device`);
-        return;
-      } catch (err: any) {
-        if (err?.name !== 'AbortError') {
-          console.warn('File picker note:', err);
-        }
+        setDeviceFiles(pdfStore.getAllFiles());
+        onShowToast(`Added ${scanned.length} document${scanned.length === 1 ? '' : 's'} from device`);
+      } else {
+        onShowToast('Device scan complete: all PDFs up to date');
       }
-    }
-
-    // Default rescan feedback
-    setTimeout(() => {
+    } catch (err: any) {
+      console.warn('Scan note:', err);
+      onShowToast('Device scan completed');
+    } finally {
       setIsScanning(false);
-      onShowToast('Device scan complete: all PDFs up to date');
-    }, 600);
+    }
   };
 
   // Toggle favorite
@@ -146,17 +125,6 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
-      {/* Hidden file input for opening PDFs */}
-      {Platform.OS === 'web' && (
-        <input
-          ref={filePickerRef}
-          type="file"
-          accept="application/pdf,.pdf"
-          style={{ display: 'none' }}
-          onChange={handleDeviceFileSelect}
-        />
-      )}
-
       {/* Top Header */}
       <View style={styles.header}>
         <View style={styles.titleRow}>
@@ -190,7 +158,7 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
 
             <TouchableOpacity
               style={styles.openDeviceBtn}
-              onPress={() => filePickerRef.current?.click()}
+              onPress={handleOpenDeviceFile}
               activeOpacity={0.75}
               accessibilityLabel="Open PDF File"
             >
@@ -337,14 +305,23 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
               <Text style={styles.emptySubtitle}>
                 {searchQuery
                   ? `No documents matching "${searchQuery}"`
-                  : 'No PDF documents found on device'}
+                  : 'No PDF documents found on device. Select any PDF from your files.'}
               </Text>
-              {searchQuery && (
+              {searchQuery ? (
                 <TouchableOpacity
                   onPress={() => setSearchQuery('')}
                   style={styles.emptyActionBtn}
                 >
                   <Text style={styles.emptyActionBtnText}>Clear Search</Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  onPress={handleOpenDeviceFile}
+                  style={styles.emptyActionBtn}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="folder-open-outline" size={16} color="#0d0096" />
+                  <Text style={styles.emptyActionBtnText}>Browse & Open PDF</Text>
                 </TouchableOpacity>
               )}
             </View>

@@ -7,6 +7,7 @@ interface HeaderProps {
   onBack?: () => void;
   showBack?: boolean;
   onShowToast: (msg: string) => void;
+  onOpenFileFromDevice?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -14,6 +15,7 @@ export const Header: React.FC<HeaderProps> = ({
   onBack,
   showBack = true,
   onShowToast,
+  onOpenFileFromDevice,
 }) => {
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -38,6 +40,18 @@ export const Header: React.FC<HeaderProps> = ({
         </View>
 
         <View style={styles.rightGroup}>
+          {onOpenFileFromDevice && (
+            <TouchableOpacity
+              accessibilityLabel="Open document from device"
+              onPress={onOpenFileFromDevice}
+              style={styles.openHeaderBtn}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="folder-open-outline" size={16} color="#7bd0ff" />
+              <Text style={styles.openHeaderBtnText}>Open</Text>
+            </TouchableOpacity>
+          )}
+
           <TouchableOpacity
             accessibilityLabel="More actions"
             onPress={() => setMenuOpen(!menuOpen)}
@@ -49,6 +63,20 @@ export const Header: React.FC<HeaderProps> = ({
 
           {menuOpen && (
             <View style={styles.dropdownMenu}>
+              {onOpenFileFromDevice && (
+                <TouchableOpacity
+                  onPress={() => {
+                    setMenuOpen(false);
+                    onOpenFileFromDevice();
+                  }}
+                  style={styles.dropdownItem}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="folder-open-outline" size={16} color="#7bd0ff" />
+                  <Text style={styles.dropdownText}>Open File from Device</Text>
+                </TouchableOpacity>
+              )}
+
               <TouchableOpacity
                 onPress={() => {
                   setMenuOpen(false);
@@ -185,5 +213,22 @@ const styles = StyleSheet.create({
   dropdownText: {
     color: '#dae2fd',
     fontSize: 13,
+  },
+  openHeaderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(123, 208, 255, 0.12)',
+    borderWidth: 1,
+    borderColor: '#7bd0ff',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    marginRight: 6,
+  },
+  openHeaderBtnText: {
+    color: '#7bd0ff',
+    fontSize: 12,
+    fontWeight: '700',
   },
 });
