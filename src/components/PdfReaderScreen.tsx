@@ -15,6 +15,7 @@ import {
   ActivityIndicator,
   Platform,
   Image,
+  Dimensions,
 } from "react-native";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { Header } from "./Header";
@@ -118,12 +119,19 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
   // Thumbnails Data Cache (data URLs)
   const [thumbnails, setThumbnails] = useState<Record<number, string>>({});
 
-  // Use a local file URI for the native PDF renderer; browsers can load the data URI.
+  // Responsive concrete dimensions for PDF page (A4 ratio 595:842)
+  const windowDims = Dimensions.get("window");
+  const pageWidth = Math.min(windowDims.width - 24, 620) * zoom;
+  const pageHeight = Math.round(pageWidth * (842 / 595));
+
+  // Source for react-native-pdf (Web uses data URI, native devices can use local file URI or base64 data URI)
   const pdfSource = useMemo(() => {
     if (!pdfBytes) return { uri: "" };
-    if (Platform.OS !== "web") return { uri: nativePdfUri, cache: true };
+    if (Platform.OS !== "web" && nativePdfUri) {
+      return { uri: nativePdfUri, cache: false };
+    }
     const b64 = fastUint8ToBase64(pdfBytes);
-    return { uri: `data:application/pdf;base64,${b64}`, cache: true };
+    return { uri: `data:application/pdf;base64,${b64}`, cache: false };
   }, [pdfBytes, nativePdfUri]);
 
   // Canvas & DOM Refs (portable across React Native and Web)
@@ -156,17 +164,23 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
           setNativePdfUri(localUri);
         }
 
-        // Load into PDF.js
-        const loadingTask = pdfjsLib.getDocument({
-          data: item.data,
-        });
+        // On Web, initialize pdfjsLib for search, reflow, and continuous view
+        if (Platform.OS === "web") {
+          const loadingTask = pdfjsLib.getDocument({
+            data: item.data,
+          });
 
-        const loadedDoc = await loadingTask.promise;
-        if (isCancelled) return;
-        setPdfDoc(loadedDoc);
-        setNumPages(loadedDoc.numPages);
-        setCurrentPage(1);
-        setIsLoading(false);
+          const loadedDoc = await loadingTask.promise;
+          if (isCancelled) return;
+          setPdfDoc(loadedDoc);
+          setNumPages(loadedDoc.numPages);
+          setCurrentPage(1);
+          setIsLoading(false);
+        } else {
+          // On native devices, react-native-pdf onLoadComplete supplies numPages
+          setCurrentPage(1);
+          setIsLoading(false);
+        }
       } catch (err: any) {
         if (isCancelled) return;
         console.error("Error loading PDF:", err);
@@ -331,64 +345,18 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [currentPage, numPages, readingDirection]);
 
-  // 4. Render Active Single Page onto Canvas
-  const renderSinglePage = useCallback(async () => {
-    if (
-      Platform.OS !== "web" ||
-      !pdfDoc ||
-      !canvasRef.current ||
-      viewMode !== "single"
-    )
-      return;
-
-    try {
-      if (currentRenderTask.current) {
-        currentRenderTask.current.cancel();
-      }
-
-      const page = await pdfDoc.getPage(currentPage);
-      const canvas = canvasRef.current;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-
-      const viewport = page.getViewport({ scale: zoom, rotation });
-      const pixelRatio =
-        (typeof window !== "undefined" && window.devicePixelRatio) || 1;
-
-      canvas.width = Math.floor(viewport.width * pixelRatio);
-      canvas.height = Math.floor(viewport.height * pixelRatio);
-      canvas.style.width = `${Math.floor(viewport.width)}px`;
-      canvas.style.height = `${Math.floor(viewport.height)}px`;
-
-      // Match drawing overlay canvas size
-      if (drawCanvasRef.current) {
-        drawCanvasRef.current.width = Math.floor(viewport.width * pixelRatio);
-        drawCanvasRef.current.height = Math.floor(viewport.height * pixelRatio);
-        drawCanvasRef.current.style.width = `${Math.floor(viewport.width)}px`;
-        drawCanvasRef.current.style.height = `${Math.floor(viewport.height)}px`;
-      }
-
-      ctx.save();
-      ctx.scale(pixelRatio, pixelRatio);
-
-      const renderContext = {
-        canvasContext: ctx,
-        viewport,
-      };
-
-      const task = page.render(renderContext);
-      currentRenderTask.current = task;
-      await task.promise;
-    } catch (err: any) {
-      if (err?.name !== "RenderingCancelledException") {
-        console.warn("Canvas render notice:", err);
-      }
-    }
-  }, [pdfDoc, currentPage, zoom, rotation, viewMode]);
-
+  // 4. Synchronize drawing overlay canvas size with PDF page viewport
   useEffect(() => {
-    renderSinglePage();
-  }, [renderSinglePage]);
+    if (Platform.OS !== "web") return;
+    const canvas = canvasRef.current;
+    const drawCanvas = drawCanvasRef.current;
+    if (canvas && drawCanvas) {
+      drawCanvas.width = canvas.width;
+      drawCanvas.height = canvas.height;
+      drawCanvas.style.width = canvas.style.width;
+      drawCanvas.style.height = canvas.style.height;
+    }
+  }, [currentPage, zoom, rotation]);
 
   // 5. Render Continuous Scroll Pages
   useEffect(() => {
@@ -878,10 +846,11 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
             <View
               style={[
                 styles.pdfPaper,
-                Platform.OS !== "web" && { width: "100%" },
                 {
                   backgroundColor: t.paperBg,
                   borderColor: t.border,
+                  width: pageWidth,
+                  minHeight: pageHeight,
                 },
               ]}
             >
@@ -889,11 +858,11 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
               <View
                 style={[
                   styles.canvasRelativeWrapper,
-                  Platform.OS !== "web" && {
-                    width: "100%",
-                    aspectRatio: 595 / 842,
+                  {
+                    width: pageWidth,
+                    height: pageHeight,
+                    filter: t.canvasFilter as any,
                   },
-                  { filter: t.canvasFilter as any },
                 ]}
                 {...(Platform.OS === "web"
                   ? {
@@ -924,7 +893,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                     onError={(err) => {
                       console.warn("react-native-pdf view note:", err);
                     }}
-                    style={styles.pdfViewer}
+                    style={[styles.pdfViewer, { width: pageWidth, height: pageHeight }]}
                   />
                 ) : (
                   <ActivityIndicator size="small" color="#7bd0ff" />
@@ -938,6 +907,8 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                       position: "absolute",
                       top: 0,
                       left: 0,
+                      width: pageWidth,
+                      height: pageHeight,
                       pointerEvents:
                         activeTool === "pen" || activeTool === "highlighter"
                           ? "auto"
@@ -2267,8 +2238,10 @@ const styles = StyleSheet.create({
   },
   pdfViewer: {
     width: "100%",
+    height: "100%",
     maxWidth: "100%",
     alignItems: "center",
     justifyContent: "center",
+    flex: 1,
   },
 });

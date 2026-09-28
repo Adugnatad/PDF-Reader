@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, forwardRef } from 'react';
 import { View, StyleSheet, ActivityIndicator } from 'react-native';
 import { pdfjsLib } from '../services/pdfService';
+import { fastBase64ToUint8 } from '../utils/fastBase64';
 
 export interface Source {
   uri?: string;
@@ -50,7 +51,7 @@ export interface PdfProps {
 /**
  * Web Implementation of react-native-pdf
  * Provides 100% API compatibility with `import Pdf from 'react-native-pdf'`
- * rendering via HTML5 canvas on the Web while native devices use the native binary.
+ * rendering via HTML5 canvas with sharp devicePixelRatio scaling.
  */
 const Pdf = forwardRef<any, PdfProps>((props, forwardedRef) => {
   const {
@@ -83,13 +84,7 @@ const Pdf = forwardRef<any, PdfProps>((props, forwardedRef) => {
         let pdfData: any = uri;
         if (uri.startsWith('data:application/pdf;base64,')) {
           const b64 = uri.replace('data:application/pdf;base64,', '');
-          const binary = atob(b64);
-          const len = binary.length;
-          const bytes = new Uint8Array(len);
-          for (let i = 0; i < len; i++) {
-            bytes[i] = binary.charCodeAt(i);
-          }
-          pdfData = bytes;
+          pdfData = fastBase64ToUint8(b64);
         }
 
         const task = pdfjsLib.getDocument(
@@ -110,6 +105,7 @@ const Pdf = forwardRef<any, PdfProps>((props, forwardedRef) => {
       } catch (err: any) {
         if (isCancelled) return;
         setLoading(false);
+        console.warn('react-native-pdf web error:', err);
         if (onError) onError(err);
       }
     }
@@ -139,11 +135,17 @@ const Pdf = forwardRef<any, PdfProps>((props, forwardedRef) => {
         const canvas = canvasRef.current;
         if (!canvas) return;
 
-        canvas.width = Math.floor(viewport.width);
-        canvas.height = Math.floor(viewport.height);
+        const pixelRatio = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
+        canvas.width = Math.floor(viewport.width * pixelRatio);
+        canvas.height = Math.floor(viewport.height * pixelRatio);
+        canvas.style.width = `${Math.floor(viewport.width)}px`;
+        canvas.style.height = `${Math.floor(viewport.height)}px`;
 
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
+
+        ctx.save();
+        ctx.scale(pixelRatio, pixelRatio);
 
         const renderTask = pageObj.render({
           canvasContext: ctx,
