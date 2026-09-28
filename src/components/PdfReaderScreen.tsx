@@ -1,4 +1,10 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  useMemo,
+} from "react";
 import {
   View,
   Text,
@@ -9,17 +15,20 @@ import {
   ActivityIndicator,
   Platform,
   Image,
-} from 'react-native';
-import { Ionicons, MaterialIcons } from '@expo/vector-icons';
-import { Header } from './Header';
-import { ReaderTheme } from '../types';
-import { pdfStore } from '../services/pdfStore';
-import { pdfjsLib } from '../services/pdfService';
-import { ViewModeModal } from './ViewModeModal';
-import { pickPdfFromDevice } from '../services/nativeFilePicker';
-import Pdf from 'react-native-pdf';
-import { fastUint8ToBase64 } from '../utils/fastBase64';
-import { openInNativeSystemViewer } from '../services/nativePdfOpener';
+} from "react-native";
+import { Ionicons, MaterialIcons } from "@expo/vector-icons";
+import { Header } from "./Header";
+import { ReaderTheme } from "../types";
+import { pdfStore } from "../services/pdfStore";
+import { pdfjsLib } from "../services/pdfService";
+import { ViewModeModal } from "./ViewModeModal";
+import { pickPdfFromDevice } from "../services/nativeFilePicker";
+import Pdf from "react-native-pdf";
+import { fastUint8ToBase64 } from "../utils/fastBase64";
+import {
+  getPdfLocalUri,
+  openInNativeSystemViewer,
+} from "../services/nativePdfOpener";
 
 interface PdfReaderScreenProps {
   onBack: () => void;
@@ -55,13 +64,16 @@ interface SearchMatch {
 export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
   onBack,
   onShowToast,
-  docTitle = 'Q4_Tax_Filing_Signed.pdf',
+  docTitle = "Q4_Tax_Filing_Signed.pdf",
   docId,
 }) => {
   // Document State
   const [activeTitle, setActiveTitle] = useState(docTitle);
   const [activeId, setActiveId] = useState(docId || docTitle);
-  const [pdfBytes, setPdfBytes] = useState<Uint8Array | ArrayBuffer | null>(null);
+  const [pdfBytes, setPdfBytes] = useState<Uint8Array | ArrayBuffer | null>(
+    null,
+  );
+  const [nativePdfUri, setNativePdfUri] = useState("");
   const [pdfDoc, setPdfDoc] = useState<any>(null);
   const [numPages, setNumPages] = useState<number>(0);
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -69,13 +81,15 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
   const [loadError, setLoadError] = useState<string | null>(null);
 
   // View & Layout Settings
-  const [theme, setTheme] = useState<ReaderTheme>('sepia');
+  const [theme, setTheme] = useState<ReaderTheme>("sepia");
   const [reflow, setReflow] = useState<boolean>(false);
   const [reflowFontSize, setReflowFontSize] = useState<number>(16);
-  const [reflowText, setReflowText] = useState<string>('');
+  const [reflowText, setReflowText] = useState<string>("");
   const [reflowParagraphs, setReflowParagraphs] = useState<string[]>([]);
-  const [viewMode, setViewMode] = useState<'single' | 'continuous'>('single');
-  const [readingDirection, setReadingDirection] = useState<'horizontal' | 'vertical'>('vertical');
+  const [viewMode, setViewMode] = useState<"single" | "continuous">("single");
+  const [readingDirection, setReadingDirection] = useState<
+    "horizontal" | "vertical"
+  >("vertical");
   const [showViewModeModal, setShowViewModeModal] = useState<boolean>(false);
   const [zoom, setZoom] = useState<number>(1.0);
   const [rotation, setRotation] = useState<number>(0);
@@ -85,29 +99,32 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
 
   // Search State
   const [searchOpen, setSearchOpen] = useState<boolean>(false);
-  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [searchQuery, setSearchQuery] = useState<string>("");
   const [searchResults, setSearchResults] = useState<SearchMatch[]>([]);
   const [searchIndex, setSearchIndex] = useState<number>(0);
   const [isSearching, setIsSearching] = useState<boolean>(false);
 
   // Annotation & Drawing State
   const [activeTool, setActiveTool] = useState<
-    'hand' | 'highlighter' | 'pen' | 'note' | 'signature' | 'eraser'
-  >('hand');
+    "hand" | "highlighter" | "pen" | "note" | "signature" | "eraser"
+  >("hand");
   const [notes, setNotes] = useState<NoteAnnotation[]>([]);
   const [stamps, setStamps] = useState<StampAnnotation[]>([]);
-  const [activeNoteEditing, setActiveNoteEditing] = useState<string | null>(null);
-  const [newNoteInput, setNewNoteInput] = useState<string>('');
+  const [activeNoteEditing, setActiveNoteEditing] = useState<string | null>(
+    null,
+  );
+  const [newNoteInput, setNewNoteInput] = useState<string>("");
 
   // Thumbnails Data Cache (data URLs)
   const [thumbnails, setThumbnails] = useState<Record<number, string>>({});
 
-  // Compute base64 source for react-native-pdf
+  // Use a local file URI for the native PDF renderer; browsers can load the data URI.
   const pdfSource = useMemo(() => {
-    if (!pdfBytes) return { uri: '' };
+    if (!pdfBytes) return { uri: "" };
+    if (Platform.OS !== "web") return { uri: nativePdfUri, cache: true };
     const b64 = fastUint8ToBase64(pdfBytes);
     return { uri: `data:application/pdf;base64,${b64}`, cache: true };
-  }, [pdfBytes]);
+  }, [pdfBytes, nativePdfUri]);
 
   // Canvas & DOM Refs (portable across React Native and Web)
   const canvasRef = useRef<any>(null);
@@ -127,10 +144,17 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
 
     async function loadPdf() {
       try {
+        setNativePdfUri("");
         const item = await pdfStore.getPdfData(activeId);
         if (isCancelled) return;
         setPdfBytes(item.data);
         setActiveTitle(item.name);
+
+        if (Platform.OS !== "web") {
+          const localUri = await getPdfLocalUri(item.data, item.name);
+          if (isCancelled) return;
+          setNativePdfUri(localUri);
+        }
 
         // Load into PDF.js
         const loadingTask = pdfjsLib.getDocument({
@@ -145,10 +169,10 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
         setIsLoading(false);
       } catch (err: any) {
         if (isCancelled) return;
-        console.error('Error loading PDF:', err);
-        setLoadError(err?.message || 'Failed to parse PDF file');
+        console.error("Error loading PDF:", err);
+        setLoadError(err?.message || "Failed to parse PDF file");
         setIsLoading(false);
-        onShowToast('Could not load PDF: ' + (err?.message || 'Error'));
+        onShowToast("Could not load PDF: " + (err?.message || "Error"));
       }
     }
 
@@ -174,15 +198,16 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
       const maxThumbPages = Math.min(numPages, 20);
       for (let i = 1; i <= maxThumbPages; i++) {
         try {
-          if (Platform.OS === 'web' && typeof document !== 'undefined') {
+          if (Platform.OS === "web" && typeof document !== "undefined") {
             const page = await pdfDoc.getPage(i);
             const thumbViewport = page.getViewport({ scale: 0.22, rotation });
-            const thumbCanvas = document.createElement('canvas');
+            const thumbCanvas = document.createElement("canvas");
             thumbCanvas.width = Math.floor(thumbViewport.width);
             thumbCanvas.height = Math.floor(thumbViewport.height);
-            const ctx = thumbCanvas.getContext('2d');
+            const ctx = thumbCanvas.getContext("2d");
             if (ctx) {
-              await page.render({ canvasContext: ctx, viewport: thumbViewport }).promise;
+              await page.render({ canvasContext: ctx, viewport: thumbViewport })
+                .promise;
               if (!isMounted) return;
               generated[i] = thumbCanvas.toDataURL();
             }
@@ -216,10 +241,10 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
 
         let lastY: number | null = null;
         const paragraphs: string[] = [];
-        let curPara = '';
+        let curPara = "";
 
         for (const item of items) {
-          const str = (item.str || '').trim();
+          const str = (item.str || "").trim();
           if (!str) continue;
 
           const y = item.transform ? Math.round(item.transform[5]) : null;
@@ -227,10 +252,10 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
           if (lastY !== null && y !== null && Math.abs(lastY - y) > 16) {
             if (curPara) {
               paragraphs.push(curPara.trim());
-              curPara = '';
+              curPara = "";
             }
           }
-          curPara += (curPara ? ' ' : '') + str;
+          curPara += (curPara ? " " : "") + str;
           lastY = y;
         }
         if (curPara) {
@@ -238,24 +263,26 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
         }
 
         const fullString = textContent.items
-          .map((item: any) => item.str || '')
-          .join(' ')
-          .replace(/\s+/g, ' ');
+          .map((item: any) => item.str || "")
+          .join(" ")
+          .replace(/\s+/g, " ");
 
         if (isMounted) {
-          setReflowText(fullString || 'No selectable text layer found on this page.');
+          setReflowText(
+            fullString || "No selectable text layer found on this page.",
+          );
           setReflowParagraphs(
             paragraphs.length > 0
               ? paragraphs
               : fullString
-              ? [fullString]
-              : ['No selectable text layer found on this page.']
+                ? [fullString]
+                : ["No selectable text layer found on this page."],
           );
         }
       } catch (err) {
         if (isMounted) {
-          setReflowText('Unable to extract text from this page.');
-          setReflowParagraphs(['Unable to extract text from this page.']);
+          setReflowText("Unable to extract text from this page.");
+          setReflowParagraphs(["Unable to extract text from this page."]);
         }
       }
     }
@@ -268,27 +295,31 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
 
   // Keyboard navigation based on reading direction
   useEffect(() => {
-    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    if (Platform.OS !== "web" || typeof window === "undefined") return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement
+      )
+        return;
 
-      if (readingDirection === 'horizontal') {
-        if (e.key === 'ArrowRight' || e.key === 'PageDown') {
+      if (readingDirection === "horizontal") {
+        if (e.key === "ArrowRight" || e.key === "PageDown") {
           if (currentPage < numPages) {
             setCurrentPage((p) => Math.min(numPages, p + 1));
           }
-        } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+        } else if (e.key === "ArrowLeft" || e.key === "PageUp") {
           if (currentPage > 1) {
             setCurrentPage((p) => Math.max(1, p - 1));
           }
         }
       } else {
-        if (e.key === 'ArrowDown' || e.key === 'PageDown') {
+        if (e.key === "ArrowDown" || e.key === "PageDown") {
           if (currentPage < numPages) {
             setCurrentPage((p) => Math.min(numPages, p + 1));
           }
-        } else if (e.key === 'ArrowUp' || e.key === 'PageUp') {
+        } else if (e.key === "ArrowUp" || e.key === "PageUp") {
           if (currentPage > 1) {
             setCurrentPage((p) => Math.max(1, p - 1));
           }
@@ -296,13 +327,19 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, [currentPage, numPages, readingDirection]);
 
   // 4. Render Active Single Page onto Canvas
   const renderSinglePage = useCallback(async () => {
-    if (!pdfDoc || !canvasRef.current || viewMode !== 'single') return;
+    if (
+      Platform.OS !== "web" ||
+      !pdfDoc ||
+      !canvasRef.current ||
+      viewMode !== "single"
+    )
+      return;
 
     try {
       if (currentRenderTask.current) {
@@ -311,11 +348,12 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
 
       const page = await pdfDoc.getPage(currentPage);
       const canvas = canvasRef.current;
-      const ctx = canvas.getContext('2d');
+      const ctx = canvas.getContext("2d");
       if (!ctx) return;
 
       const viewport = page.getViewport({ scale: zoom, rotation });
-      const pixelRatio = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
+      const pixelRatio =
+        (typeof window !== "undefined" && window.devicePixelRatio) || 1;
 
       canvas.width = Math.floor(viewport.width * pixelRatio);
       canvas.height = Math.floor(viewport.height * pixelRatio);
@@ -342,8 +380,8 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
       currentRenderTask.current = task;
       await task.promise;
     } catch (err: any) {
-      if (err?.name !== 'RenderingCancelledException') {
-        console.warn('Canvas render notice:', err);
+      if (err?.name !== "RenderingCancelledException") {
+        console.warn("Canvas render notice:", err);
       }
     }
   }, [pdfDoc, currentPage, zoom, rotation, viewMode]);
@@ -354,7 +392,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
 
   // 5. Render Continuous Scroll Pages
   useEffect(() => {
-    if (!pdfDoc || viewMode !== 'continuous') return;
+    if (!pdfDoc || viewMode !== "continuous") return;
 
     let isMounted = true;
     async function renderAllContinuousPages() {
@@ -365,14 +403,15 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
         try {
           const page = await pdfDoc.getPage(p);
           const viewport = page.getViewport({ scale: zoom * 0.9, rotation });
-          const pixelRatio = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
+          const pixelRatio =
+            (typeof window !== "undefined" && window.devicePixelRatio) || 1;
 
           c.width = Math.floor(viewport.width * pixelRatio);
           c.height = Math.floor(viewport.height * pixelRatio);
           c.style.width = `${Math.floor(viewport.width)}px`;
           c.style.height = `${Math.floor(viewport.height)}px`;
 
-          const ctx = c.getContext('2d');
+          const ctx = c.getContext("2d");
           if (ctx) {
             ctx.save();
             ctx.scale(pixelRatio, pixelRatio);
@@ -431,7 +470,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
 
   const handleFitWidth = () => {
     setZoom(1.0);
-    onShowToast('Zoom reset to 100% (Fit Width)');
+    onShowToast("Zoom reset to 100% (Fit Width)");
   };
 
   const handleRotate = () => {
@@ -454,7 +493,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
       for (let p = 1; p <= numPages; p++) {
         const page = await pdfDoc.getPage(p);
         const content = await page.getTextContent();
-        const text = content.items.map((i: any) => i.str || '').join(' ');
+        const text = content.items.map((i: any) => i.str || "").join(" ");
         if (text.toLowerCase().includes(q)) {
           const idx = text.toLowerCase().indexOf(q);
           const start = Math.max(0, idx - 25);
@@ -470,13 +509,15 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
 
       if (matches.length > 0) {
         setCurrentPage(matches[0].page);
-        onShowToast(`Found ${matches.length} matches. Showing match 1 on Page ${matches[0].page}`);
+        onShowToast(
+          `Found ${matches.length} matches. Showing match 1 on Page ${matches[0].page}`,
+        );
       } else {
         onShowToast(`No matches found for "${searchQuery}"`);
       }
     } catch (err) {
       setIsSearching(false);
-      onShowToast('Search error occurred');
+      onShowToast("Search error occurred");
     }
   };
 
@@ -485,15 +526,20 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
     const nextIdx = (searchIndex + 1) % searchResults.length;
     setSearchIndex(nextIdx);
     setCurrentPage(searchResults[nextIdx].page);
-    onShowToast(`Match ${nextIdx + 1} of ${searchResults.length} (Page ${searchResults[nextIdx].page})`);
+    onShowToast(
+      `Match ${nextIdx + 1} of ${searchResults.length} (Page ${searchResults[nextIdx].page})`,
+    );
   };
 
   const handlePrevSearchMatch = () => {
     if (searchResults.length === 0) return;
-    const prevIdx = (searchIndex - 1 + searchResults.length) % searchResults.length;
+    const prevIdx =
+      (searchIndex - 1 + searchResults.length) % searchResults.length;
     setSearchIndex(prevIdx);
     setCurrentPage(searchResults[prevIdx].page);
-    onShowToast(`Match ${prevIdx + 1} of ${searchResults.length} (Page ${searchResults[prevIdx].page})`);
+    onShowToast(
+      `Match ${prevIdx + 1} of ${searchResults.length} (Page ${searchResults[prevIdx].page})`,
+    );
   };
 
   // 9. Open Another PDF from Native Device Storage or Web
@@ -505,34 +551,34 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
       onShowToast(`Opening ${picked.name}...`);
       const newDoc = pdfStore.addUploadedPdf(
         { name: picked.name, size: picked.size },
-        picked.buffer
+        picked.buffer,
       );
       setActiveId(newDoc.id);
       setActiveTitle(newDoc.name);
       setLoadError(null);
       onShowToast(`Opened ${picked.name}`);
     } catch (err: any) {
-      onShowToast('Error loading PDF: ' + (err?.message || 'Failed'));
+      onShowToast("Error loading PDF: " + (err?.message || "Failed"));
     }
   };
 
   // 10. Open in Native System Viewer (Apple QuickLook / Android System PDF Reader)
   const handleOpenSystemViewer = async () => {
     if (!pdfBytes) {
-      onShowToast('PDF data not ready');
+      onShowToast("PDF data not ready");
       return;
     }
-    onShowToast('Opening in system viewer...');
+    onShowToast("Opening in system viewer...");
     const ok = await openInNativeSystemViewer(pdfBytes, activeTitle);
-    if (!ok && Platform.OS === 'web') {
-      onShowToast('Opened PDF in new browser tab');
+    if (!ok && Platform.OS === "web") {
+      onShowToast("Opened PDF in new browser tab");
     }
   };
 
   // 11. Download Current PDF
   const handleDownload = () => {
     if (!pdfBytes) {
-      onShowToast('PDF data not ready');
+      onShowToast("PDF data not ready");
       return;
     }
     pdfStore.downloadPdf(pdfBytes, activeTitle);
@@ -548,29 +594,32 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
     const pctX = Math.round((clickX / rect.width) * 100);
     const pctY = Math.round((clickY / rect.height) * 100);
 
-    if (activeTool === 'note') {
+    if (activeTool === "note") {
       const noteId = `note-${Date.now()}`;
       const newNote: NoteAnnotation = {
         id: noteId,
         page: currentPage,
         x: pctX,
         y: pctY,
-        text: 'Add your note here...',
-        author: 'Reviewer',
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        text: "Add your note here...",
+        author: "Reviewer",
+        time: new Date().toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
       };
       setNotes((prev) => [...prev, newNote]);
       setActiveNoteEditing(noteId);
       setNewNoteInput(newNote.text);
       onShowToast(`Sticky Note placed on Page ${currentPage}`);
-    } else if (activeTool === 'signature') {
+    } else if (activeTool === "signature") {
       const stampId = `stamp-${Date.now()}`;
       const newStamp: StampAnnotation = {
         id: stampId,
         page: currentPage,
         x: pctX,
         y: pctY,
-        title: 'VERIFIED & CERTIFIED',
+        title: "VERIFIED & CERTIFIED",
         time: new Date().toLocaleDateString(),
       };
       setStamps((prev) => [...prev, newStamp]);
@@ -581,31 +630,36 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
   // Freehand drawing support
   const isDrawing = useRef<boolean>(false);
   const startDrawing = (e: any) => {
-    if (activeTool !== 'pen' && activeTool !== 'highlighter') return;
+    if (activeTool !== "pen" && activeTool !== "highlighter") return;
     const canvas = drawCanvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
     isDrawing.current = true;
     ctx.beginPath();
     ctx.moveTo(x, y);
-    ctx.lineWidth = activeTool === 'highlighter' ? 14 : 3;
-    ctx.lineCap = 'round';
-    ctx.strokeStyle = activeTool === 'highlighter' ? 'rgba(255, 235, 59, 0.45)' : '#2563eb';
+    ctx.lineWidth = activeTool === "highlighter" ? 14 : 3;
+    ctx.lineCap = "round";
+    ctx.strokeStyle =
+      activeTool === "highlighter" ? "rgba(255, 235, 59, 0.45)" : "#2563eb";
   };
 
   const drawMove = (e: any) => {
-    if (!isDrawing.current || (activeTool !== 'pen' && activeTool !== 'highlighter')) return;
+    if (
+      !isDrawing.current ||
+      (activeTool !== "pen" && activeTool !== "highlighter")
+    )
+      return;
     const canvas = drawCanvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.lineTo(x, y);
     ctx.stroke();
@@ -618,7 +672,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
   const clearCurrentMarkups = () => {
     const canvas = drawCanvasRef.current;
     if (canvas) {
-      const ctx = canvas.getContext('2d');
+      const ctx = canvas.getContext("2d");
       if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
     setNotes((prev) => prev.filter((n) => n.page !== currentPage));
@@ -628,34 +682,34 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
 
   // Color & Theme Styling
   const getThemeColors = () => {
-    if (theme === 'light') {
+    if (theme === "light") {
       return {
-        bg: '#f8fafc',
-        paperBg: '#ffffff',
-        text: '#0f172a',
-        muted: '#64748b',
-        border: '#e2e8f0',
-        canvasFilter: 'none',
+        bg: "#f8fafc",
+        paperBg: "#ffffff",
+        text: "#0f172a",
+        muted: "#64748b",
+        border: "#e2e8f0",
+        canvasFilter: "none",
       };
     }
-    if (theme === 'night') {
+    if (theme === "night") {
       return {
-        bg: '#080d1a',
-        paperBg: '#131b2e',
-        text: '#dae2fd',
-        muted: '#908fa0',
-        border: '#2d3449',
-        canvasFilter: 'invert(0.92) hue-rotate(180deg) brightness(0.95)',
+        bg: "#080d1a",
+        paperBg: "#131b2e",
+        text: "#dae2fd",
+        muted: "#908fa0",
+        border: "#2d3449",
+        canvasFilter: "invert(0.92) hue-rotate(180deg) brightness(0.95)",
       };
     }
     // Sepia
     return {
-      bg: '#f5efe6',
-      paperBg: '#fdfbf7',
-      text: '#1a1c1e',
-      muted: '#8c887e',
-      border: '#e2ddd3',
-      canvasFilter: 'sepia(0.35) contrast(0.95) brightness(0.96)',
+      bg: "#f5efe6",
+      paperBg: "#fdfbf7",
+      text: "#1a1c1e",
+      muted: "#8c887e",
+      border: "#e2ddd3",
+      canvasFilter: "sepia(0.35) contrast(0.95) brightness(0.96)",
     };
   };
 
@@ -697,19 +751,33 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
               style={styles.retryBtn}
               activeOpacity={0.8}
             >
-              <Ionicons name="folder-open-outline" size={16} color="#ffffff" style={{ marginRight: 6 }} />
-              <Text style={styles.retryBtnText}>Choose Another PDF from Device</Text>
+              <Ionicons
+                name="folder-open-outline"
+                size={16}
+                color="#ffffff"
+                style={{ marginRight: 6 }}
+              />
+              <Text style={styles.retryBtnText}>
+                Choose Another PDF from Device
+              </Text>
             </TouchableOpacity>
           </View>
         )}
 
         {/* 1. REFLOW / PURE TEXT READER MODE */}
         {!isLoading && !loadError && reflow && (
-          <View style={[styles.reflowContainer, { backgroundColor: t.paperBg, borderColor: t.border }]}>
+          <View
+            style={[
+              styles.reflowContainer,
+              { backgroundColor: t.paperBg, borderColor: t.border },
+            ]}
+          >
             <View style={styles.reflowHeader}>
               <View style={styles.reflowPageBadge}>
                 <Ionicons name="document-text" size={13} color="#0284c7" />
-                <Text style={styles.reflowPageBadgeText}>REFLOW • PAGE {currentPage} OF {numPages}</Text>
+                <Text style={styles.reflowPageBadgeText}>
+                  REFLOW • PAGE {currentPage} OF {numPages}
+                </Text>
               </View>
               <View style={styles.reflowControls}>
                 <TouchableOpacity
@@ -721,7 +789,9 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                 </TouchableOpacity>
 
                 <View style={styles.reflowFontSizeBadge}>
-                  <Text style={styles.reflowFontSizeText}>{reflowFontSize}px</Text>
+                  <Text style={styles.reflowFontSizeText}>
+                    {reflowFontSize}px
+                  </Text>
                 </View>
 
                 <TouchableOpacity
@@ -764,10 +834,10 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
         )}
 
         {/* 2. REAL CANVAS RENDERING (SINGLE PAGE MODE) */}
-        {!isLoading && !loadError && !reflow && viewMode === 'single' && (
+        {!isLoading && !loadError && !reflow && viewMode === "single" && (
           <View style={styles.pageOuterWrapper}>
             {/* Floating Lateral Navigation Chevron Arrows (for Horizontal Reading Direction) */}
-            {readingDirection === 'horizontal' && (
+            {readingDirection === "horizontal" && (
               <>
                 <TouchableOpacity
                   onPress={handlePrevPage}
@@ -782,7 +852,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                   <Ionicons
                     name="chevron-back"
                     size={22}
-                    color={currentPage <= 1 ? '#475569' : '#ffffff'}
+                    color={currentPage <= 1 ? "#475569" : "#ffffff"}
                   />
                 </TouchableOpacity>
 
@@ -799,7 +869,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                   <Ionicons
                     name="chevron-forward"
                     size={22}
-                    color={currentPage >= numPages ? '#475569' : '#ffffff'}
+                    color={currentPage >= numPages ? "#475569" : "#ffffff"}
                   />
                 </TouchableOpacity>
               </>
@@ -808,6 +878,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
             <View
               style={[
                 styles.pdfPaper,
+                Platform.OS !== "web" && { width: "100%" },
                 {
                   backgroundColor: t.paperBg,
                   borderColor: t.border,
@@ -816,8 +887,15 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
             >
               {/* Canvas viewport container */}
               <View
-                style={[styles.canvasRelativeWrapper, { filter: t.canvasFilter as any }]}
-                {...(Platform.OS === 'web'
+                style={[
+                  styles.canvasRelativeWrapper,
+                  Platform.OS !== "web" && {
+                    width: "100%",
+                    aspectRatio: 595 / 842,
+                  },
+                  { filter: t.canvasFilter as any },
+                ]}
+                {...(Platform.OS === "web"
                   ? {
                       onClick: handleCanvasClick,
                       onMouseDown: startDrawing,
@@ -834,7 +912,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                     source={pdfSource}
                     page={currentPage}
                     scale={zoom}
-                    horizontal={readingDirection === 'horizontal'}
+                    horizontal={readingDirection === "horizontal"}
                     onLoadComplete={(loadedPages) => {
                       setNumPages(loadedPages);
                       setIsLoading(false);
@@ -844,7 +922,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                       setNumPages(total);
                     }}
                     onError={(err) => {
-                      console.warn('react-native-pdf view note:', err);
+                      console.warn("react-native-pdf view note:", err);
                     }}
                     style={styles.pdfViewer}
                   />
@@ -853,16 +931,18 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                 )}
 
                 {/* Freehand Drawing Overlay Canvas */}
-                {Platform.OS === 'web' && (
+                {Platform.OS === "web" && (
                   <canvas
                     ref={drawCanvasRef}
                     style={{
-                      position: 'absolute',
+                      position: "absolute",
                       top: 0,
                       left: 0,
                       pointerEvents:
-                        activeTool === 'pen' || activeTool === 'highlighter' ? 'auto' : 'none',
-                      maxWidth: '100%',
+                        activeTool === "pen" || activeTool === "highlighter"
+                          ? "auto"
+                          : "none",
+                      maxWidth: "100%",
                     }}
                   />
                 )}
@@ -873,7 +953,10 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                   .map((note) => (
                     <View
                       key={note.id}
-                      style={[styles.notePin, { top: `${note.y}%` as any, left: `${note.x}%` as any }]}
+                      style={[
+                        styles.notePin,
+                        { top: `${note.y}%` as any, left: `${note.x}%` as any },
+                      ]}
                     >
                       <TouchableOpacity
                         onPress={() => setActiveNoteEditing(note.id)}
@@ -893,10 +976,14 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                             <TouchableOpacity
                               onPress={() => {
                                 setNotes((prev) =>
-                                  prev.map((n) => (n.id === note.id ? { ...n, text: newNoteInput } : n))
+                                  prev.map((n) =>
+                                    n.id === note.id
+                                      ? { ...n, text: newNoteInput }
+                                      : n,
+                                  ),
                                 );
                                 setActiveNoteEditing(null);
-                                onShowToast('Note updated');
+                                onShowToast("Note updated");
                               }}
                               style={styles.noteSaveBtn}
                             >
@@ -904,12 +991,16 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                             </TouchableOpacity>
                             <TouchableOpacity
                               onPress={() => {
-                                setNotes((prev) => prev.filter((n) => n.id !== note.id));
+                                setNotes((prev) =>
+                                  prev.filter((n) => n.id !== note.id),
+                                );
                                 setActiveNoteEditing(null);
                               }}
                               style={styles.noteDeleteBtn}
                             >
-                              <Text style={styles.noteDeleteBtnText}>Delete</Text>
+                              <Text style={styles.noteDeleteBtnText}>
+                                Delete
+                              </Text>
                             </TouchableOpacity>
                           </View>
                         </View>
@@ -924,11 +1015,20 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                       key={stamp.id}
                       style={[
                         styles.stampOverlay,
-                        { top: `${stamp.y}%` as any, left: `${stamp.x}%` as any },
+                        {
+                          top: `${stamp.y}%` as any,
+                          left: `${stamp.x}%` as any,
+                        },
                       ]}
                     >
-                      <Ionicons name="shield-checkmark" size={16} color="#059669" />
-                      <Text style={styles.stampOverlayTitle}>{stamp.title}</Text>
+                      <Ionicons
+                        name="shield-checkmark"
+                        size={16}
+                        color="#059669"
+                      />
+                      <Text style={styles.stampOverlayTitle}>
+                        {stamp.title}
+                      </Text>
                       <Text style={styles.stampOverlayTime}>{stamp.time}</Text>
                     </View>
                   ))}
@@ -944,18 +1044,20 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                 </Text>
               </View>
             </View>
-           
           </View>
         )}
 
         {/* 3. CONTINUOUS SCROLL VIEW */}
-        {!isLoading && !loadError && !reflow && viewMode === 'continuous' && (
-          readingDirection === 'horizontal' ? (
+        {!isLoading &&
+          !loadError &&
+          !reflow &&
+          viewMode === "continuous" &&
+          (readingDirection === "horizontal" ? (
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={true}
               contentContainerStyle={styles.continuousContainerHorizontal}
-              style={{ width: '100%' }}
+              style={{ width: "100%" }}
             >
               {Array.from({ length: numPages }, (_, i) => i + 1).map((p) => (
                 <View
@@ -969,29 +1071,53 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                   ]}
                 >
                   <View style={styles.continuousPageHeader}>
-                    <Text style={[styles.continuousPageNum, { color: t.muted }]}>Page {p} of {numPages}</Text>
+                    <Text
+                      style={[styles.continuousPageNum, { color: t.muted }]}
+                    >
+                      Page {p} of {numPages}
+                    </Text>
                   </View>
-                  <View style={{ filter: t.canvasFilter as any, alignItems: 'center' }}>
-                    {Platform.OS === 'web' ? (
+                  <View
+                    style={{
+                      filter: t.canvasFilter as any,
+                      alignItems: "center",
+                    }}
+                  >
+                    {Platform.OS === "web" ? (
                       <canvas
                         ref={(el) => {
                           if (el) continuousCanvases.current.set(p, el);
                           else continuousCanvases.current.delete(p);
                         }}
-                        style={{ display: 'block', maxWidth: '100%' }}
+                        style={{ display: "block", maxWidth: "100%" }}
                       />
                     ) : (
                       <View style={styles.nativePdfFallbackCard}>
-                        <Ionicons name="document-text" size={32} color="#7bd0ff" />
-                        <Text style={[styles.nativePdfFallbackSubtitle, { color: t.text, fontWeight: '700' }]}>
+                        <Ionicons
+                          name="document-text"
+                          size={32}
+                          color="#7bd0ff"
+                        />
+                        <Text
+                          style={[
+                            styles.nativePdfFallbackSubtitle,
+                            { color: t.text, fontWeight: "700" },
+                          ]}
+                        >
                           Page {p} of {numPages}
                         </Text>
                         <TouchableOpacity
                           style={styles.nativeContinuousBtn}
                           onPress={handleOpenSystemViewer}
                         >
-                          <Ionicons name="open-outline" size={14} color="#0d0096" />
-                          <Text style={styles.nativeContinuousBtnText}>Open with System Viewer</Text>
+                          <Ionicons
+                            name="open-outline"
+                            size={14}
+                            color="#0d0096"
+                          />
+                          <Text style={styles.nativeContinuousBtnText}>
+                            Open with System Viewer
+                          </Text>
                         </TouchableOpacity>
                       </View>
                     )}
@@ -1000,7 +1126,10 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
               ))}
             </ScrollView>
           ) : (
-            <View ref={continuousContainerRef} style={styles.continuousContainer}>
+            <View
+              ref={continuousContainerRef}
+              style={styles.continuousContainer}
+            >
               {Array.from({ length: numPages }, (_, i) => i + 1).map((p) => (
                 <View
                   key={p}
@@ -1013,29 +1142,53 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                   ]}
                 >
                   <View style={styles.continuousPageHeader}>
-                    <Text style={[styles.continuousPageNum, { color: t.muted }]}>Page {p} of {numPages}</Text>
+                    <Text
+                      style={[styles.continuousPageNum, { color: t.muted }]}
+                    >
+                      Page {p} of {numPages}
+                    </Text>
                   </View>
-                  <View style={{ filter: t.canvasFilter as any, alignItems: 'center' }}>
-                    {Platform.OS === 'web' ? (
+                  <View
+                    style={{
+                      filter: t.canvasFilter as any,
+                      alignItems: "center",
+                    }}
+                  >
+                    {Platform.OS === "web" ? (
                       <canvas
                         ref={(el) => {
                           if (el) continuousCanvases.current.set(p, el);
                           else continuousCanvases.current.delete(p);
                         }}
-                        style={{ display: 'block', maxWidth: '100%' }}
+                        style={{ display: "block", maxWidth: "100%" }}
                       />
                     ) : (
                       <View style={styles.nativePdfFallbackCard}>
-                        <Ionicons name="document-text" size={32} color="#7bd0ff" />
-                        <Text style={[styles.nativePdfFallbackSubtitle, { color: t.text, fontWeight: '700' }]}>
+                        <Ionicons
+                          name="document-text"
+                          size={32}
+                          color="#7bd0ff"
+                        />
+                        <Text
+                          style={[
+                            styles.nativePdfFallbackSubtitle,
+                            { color: t.text, fontWeight: "700" },
+                          ]}
+                        >
                           Page {p} of {numPages}
                         </Text>
                         <TouchableOpacity
                           style={styles.nativeContinuousBtn}
                           onPress={handleOpenSystemViewer}
                         >
-                          <Ionicons name="open-outline" size={14} color="#0d0096" />
-                          <Text style={styles.nativeContinuousBtnText}>Open with System Viewer</Text>
+                          <Ionicons
+                            name="open-outline"
+                            size={14}
+                            color="#0d0096"
+                          />
+                          <Text style={styles.nativeContinuousBtnText}>
+                            Open with System Viewer
+                          </Text>
                         </TouchableOpacity>
                       </View>
                     )}
@@ -1043,14 +1196,15 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                 </View>
               ))}
             </View>
-          )
-        )}
+          ))}
 
         {/* Real Dynamic Thumbnail Strip */}
         {showThumbnails && !isLoading && !loadError && (
           <View style={styles.thumbnailStrip}>
             <View style={styles.thumbStripHeader}>
-              <Text style={styles.thumbStripTitle}>DOCUMENT PAGES ({numPages})</Text>
+              <Text style={styles.thumbStripTitle}>
+                DOCUMENT PAGES ({numPages})
+              </Text>
               <Text style={styles.thumbStripSubtitle}>Tap to jump to page</Text>
             </View>
 
@@ -1059,36 +1213,46 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.thumbScroll}
             >
-              {Array.from({ length: numPages }, (_, idx) => idx + 1).map((p) => {
-                const isCur = currentPage === p;
-                const thumbData = thumbnails[p];
+              {Array.from({ length: numPages }, (_, idx) => idx + 1).map(
+                (p) => {
+                  const isCur = currentPage === p;
+                  const thumbData = thumbnails[p];
 
-                return (
-                  <TouchableOpacity
-                    key={p}
-                    onPress={() => handleSelectPage(p)}
-                    style={[styles.thumbCard, isCur && styles.thumbCardActive]}
-                    activeOpacity={0.7}
-                  >
-                    <View style={styles.thumbImageWrap}>
-                      {thumbData ? (
-                        <Image
-                          source={{ uri: thumbData }}
-                          style={styles.thumbImage}
-                          resizeMode="contain"
-                        />
-                      ) : (
-                        <View style={styles.thumbPlaceholder}>
-                          <ActivityIndicator size="small" color="#908fa0" />
-                        </View>
-                      )}
-                    </View>
-                    <Text style={[styles.thumbLabel, isCur && styles.thumbLabelActive]}>
-                      P. {p}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
+                  return (
+                    <TouchableOpacity
+                      key={p}
+                      onPress={() => handleSelectPage(p)}
+                      style={[
+                        styles.thumbCard,
+                        isCur && styles.thumbCardActive,
+                      ]}
+                      activeOpacity={0.7}
+                    >
+                      <View style={styles.thumbImageWrap}>
+                        {thumbData ? (
+                          <Image
+                            source={{ uri: thumbData }}
+                            style={styles.thumbImage}
+                            resizeMode="contain"
+                          />
+                        ) : (
+                          <View style={styles.thumbPlaceholder}>
+                            <ActivityIndicator size="small" color="#908fa0" />
+                          </View>
+                        )}
+                      </View>
+                      <Text
+                        style={[
+                          styles.thumbLabel,
+                          isCur && styles.thumbLabelActive,
+                        ]}
+                      >
+                        P. {p}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                },
+              )}
             </ScrollView>
           </View>
         )}
@@ -1101,17 +1265,26 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
           <View style={styles.dockPageNavGroup}>
             <TouchableOpacity
               onPress={handlePrevPage}
-              disabled={currentPage <= 1 || viewMode === 'continuous'}
+              disabled={currentPage <= 1 || viewMode === "continuous"}
               style={[
                 styles.dockNavBtn,
-                (currentPage <= 1 || viewMode === 'continuous') && styles.dockBtnDisabled,
+                (currentPage <= 1 || viewMode === "continuous") &&
+                  styles.dockBtnDisabled,
               ]}
               accessibilityLabel="Previous Page"
             >
               <Ionicons
-                name={readingDirection === 'horizontal' ? 'chevron-back' : 'arrow-back'}
+                name={
+                  readingDirection === "horizontal"
+                    ? "chevron-back"
+                    : "arrow-back"
+                }
                 size={18}
-                color={currentPage <= 1 || viewMode === 'continuous' ? '#4b5563' : '#dae2fd'}
+                color={
+                  currentPage <= 1 || viewMode === "continuous"
+                    ? "#4b5563"
+                    : "#dae2fd"
+                }
               />
             </TouchableOpacity>
 
@@ -1128,17 +1301,26 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
 
             <TouchableOpacity
               onPress={handleNextPage}
-              disabled={currentPage >= numPages || viewMode === 'continuous'}
+              disabled={currentPage >= numPages || viewMode === "continuous"}
               style={[
                 styles.dockNavBtn,
-                (currentPage >= numPages || viewMode === 'continuous') && styles.dockBtnDisabled,
+                (currentPage >= numPages || viewMode === "continuous") &&
+                  styles.dockBtnDisabled,
               ]}
               accessibilityLabel="Next Page"
             >
               <Ionicons
-                name={readingDirection === 'horizontal' ? 'chevron-forward' : 'arrow-forward'}
+                name={
+                  readingDirection === "horizontal"
+                    ? "chevron-forward"
+                    : "arrow-forward"
+                }
                 size={18}
-                color={currentPage >= numPages || viewMode === 'continuous' ? '#4b5563' : '#dae2fd'}
+                color={
+                  currentPage >= numPages || viewMode === "continuous"
+                    ? "#4b5563"
+                    : "#dae2fd"
+                }
               />
             </TouchableOpacity>
           </View>
@@ -1153,7 +1335,6 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
             <View style={styles.viewModeBottomInner}>
               <MaterialIcons name="book" size={16} color="#0d0096" />
               <Text style={styles.viewModeBtnTitle}>View Mode</Text>
-             
             </View>
           </TouchableOpacity>
         </View>
@@ -1182,68 +1363,68 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0b1326',
+    backgroundColor: "#0b1326",
   },
   toolbarWrapper: {
-    backgroundColor: 'rgba(11, 19, 38, 0.95)',
+    backgroundColor: "rgba(11, 19, 38, 0.95)",
     borderBottomWidth: 1,
-    borderBottomColor: '#2d3449',
+    borderBottomColor: "#2d3449",
     paddingHorizontal: 12,
     paddingVertical: 8,
     zIndex: 40,
   },
   controlPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    flexWrap: 'wrap',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    flexWrap: "wrap",
     gap: 8,
   },
   pagePickerContainer: {
-    position: 'relative',
+    position: "relative",
   },
   pagePickerTrigger: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#171f33',
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#171f33",
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#2d3449',
+    borderColor: "#2d3449",
     gap: 6,
   },
   pagePickerText: {
-    color: '#dae2fd',
+    color: "#dae2fd",
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: "700",
   },
   pageTotalText: {
-    color: '#908fa0',
+    color: "#908fa0",
     fontSize: 12,
-    fontWeight: '400',
+    fontWeight: "400",
   },
   pageDropdown: {
-    position: 'absolute',
+    position: "absolute",
     top: 40,
     left: 0,
     width: 200,
-    backgroundColor: '#171f33',
+    backgroundColor: "#171f33",
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#2d3449',
+    borderColor: "#2d3449",
     padding: 10,
     zIndex: 100,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.5,
     shadowRadius: 16,
     elevation: 10,
   },
   pageDropdownTitle: {
-    color: '#908fa0',
+    color: "#908fa0",
     fontSize: 10,
-    fontWeight: '700',
+    fontWeight: "700",
     letterSpacing: 1,
     marginBottom: 8,
   },
@@ -1251,37 +1432,37 @@ const styles = StyleSheet.create({
     maxHeight: 180,
   },
   pageGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexDirection: "row",
+    flexWrap: "wrap",
     gap: 6,
   },
   pageGridItem: {
     width: 38,
     height: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     borderRadius: 6,
-    backgroundColor: '#0b1326',
+    backgroundColor: "#0b1326",
   },
   pageGridItemActive: {
-    backgroundColor: '#c0c1ff',
+    backgroundColor: "#c0c1ff",
   },
   pageGridText: {
-    color: '#dae2fd',
+    color: "#dae2fd",
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   pageGridTextActive: {
-    color: '#0d0096',
-    fontWeight: '700',
+    color: "#0d0096",
+    fontWeight: "700",
   },
   themeSelector: {
-    flexDirection: 'row',
-    backgroundColor: '#171f33',
+    flexDirection: "row",
+    backgroundColor: "#171f33",
     borderRadius: 8,
     padding: 2,
     borderWidth: 1,
-    borderColor: '#2d3449',
+    borderColor: "#2d3449",
   },
   themeBtn: {
     paddingHorizontal: 8,
@@ -1289,65 +1470,65 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   themeBtnActive: {
-    backgroundColor: '#2d3449',
+    backgroundColor: "#2d3449",
   },
   quickActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 5,
   },
   actionBtn: {
     width: 32,
     height: 32,
     borderRadius: 8,
-    backgroundColor: '#171f33',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: "#171f33",
+    alignItems: "center",
+    justifyContent: "center",
     borderWidth: 1,
-    borderColor: '#2d3449',
+    borderColor: "#2d3449",
   },
   actionBtnActive: {
-    backgroundColor: '#c0c1ff',
-    borderColor: '#c0c1ff',
+    backgroundColor: "#c0c1ff",
+    borderColor: "#c0c1ff",
   },
   zoomLabelBtn: {
     paddingHorizontal: 6,
     height: 32,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#171f33',
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#171f33",
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#2d3449',
+    borderColor: "#2d3449",
   },
   zoomLabelText: {
-    color: '#dae2fd',
+    color: "#dae2fd",
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   openAnotherBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 4,
-    backgroundColor: '#142738',
-    borderColor: 'rgba(123, 208, 255, 0.4)',
+    backgroundColor: "#142738",
+    borderColor: "rgba(123, 208, 255, 0.4)",
     borderWidth: 1,
     paddingHorizontal: 8,
     paddingVertical: 5,
     borderRadius: 8,
   },
   openAnotherText: {
-    color: '#7bd0ff',
+    color: "#7bd0ff",
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   searchDrawer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#171f33',
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#171f33",
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#2d3449',
+    borderColor: "#2d3449",
     marginTop: 8,
     paddingHorizontal: 10,
     height: 38,
@@ -1355,31 +1536,31 @@ const styles = StyleSheet.create({
   },
   searchDrawerInput: {
     flex: 1,
-    color: '#dae2fd',
+    color: "#dae2fd",
     fontSize: 13,
     paddingVertical: 0,
-    outlineStyle: 'none' as any,
+    outlineStyle: "none" as any,
   },
   searchFindBtn: {
-    backgroundColor: '#2d3449',
+    backgroundColor: "#2d3449",
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 6,
   },
   searchFindText: {
-    color: '#dae2fd',
+    color: "#dae2fd",
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   searchNavRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 4,
   },
   searchCountText: {
-    color: '#7bd0ff',
+    color: "#7bd0ff",
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   searchArrowBtn: {
     padding: 2,
@@ -1388,166 +1569,166 @@ const styles = StyleSheet.create({
     padding: 2,
   },
   annotationBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 6,
     paddingTop: 8,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(45, 52, 73, 0.4)',
+    borderTopColor: "rgba(45, 52, 73, 0.4)",
     marginTop: 6,
-    overflow: 'scroll' as any,
+    overflow: "scroll" as any,
   },
   toolBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 4,
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 6,
-    backgroundColor: '#171f33',
+    backgroundColor: "#171f33",
     borderWidth: 1,
-    borderColor: '#2d3449',
+    borderColor: "#2d3449",
   },
   toolBtnActive: {
-    backgroundColor: '#c0c1ff',
-    borderColor: '#c0c1ff',
+    backgroundColor: "#c0c1ff",
+    borderColor: "#c0c1ff",
   },
   toolBtnText: {
     fontSize: 11,
-    color: '#c7c4d7',
-    fontWeight: '500',
+    color: "#c7c4d7",
+    fontWeight: "500",
   },
   toolBtnTextActive: {
-    color: '#0d0096',
-    fontWeight: '700',
+    color: "#0d0096",
+    fontWeight: "700",
   },
   mainScrollView: {
     flex: 1,
   },
   mainScrollContent: {
     padding: 16,
-    alignItems: 'center',
+    alignItems: "center",
     paddingBottom: 64,
   },
   loadingContainer: {
     paddingVertical: 60,
-    alignItems: 'center',
+    alignItems: "center",
     gap: 12,
   },
   loadingTitle: {
-    color: '#dae2fd',
+    color: "#dae2fd",
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   loadingSubtitle: {
-    color: '#908fa0',
+    color: "#908fa0",
     fontSize: 13,
   },
   errorContainer: {
     paddingVertical: 40,
-    alignItems: 'center',
+    alignItems: "center",
     gap: 10,
     maxWidth: 360,
   },
   errorTitle: {
-    color: '#ffb2b7',
+    color: "#ffb2b7",
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: "700",
   },
   errorSubtitle: {
-    color: '#908fa0',
+    color: "#908fa0",
     fontSize: 13,
-    textAlign: 'center',
+    textAlign: "center",
   },
   retryBtn: {
-    backgroundColor: '#171f33',
+    backgroundColor: "#171f33",
     borderWidth: 1,
-    borderColor: '#2d3449',
+    borderColor: "#2d3449",
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 8,
     marginTop: 8,
   },
   retryBtnText: {
-    color: '#7bd0ff',
+    color: "#7bd0ff",
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   reflowContainer: {
-    width: '100%',
+    width: "100%",
     maxWidth: 680,
     borderRadius: 12,
     borderWidth: 1,
     padding: 24,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.2,
     shadowRadius: 12,
     elevation: 4,
   },
   reflowHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     marginBottom: 16,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(144, 143, 160, 0.2)',
+    borderBottomColor: "rgba(144, 143, 160, 0.2)",
     paddingBottom: 10,
   },
   reflowPageBadge: {
-    backgroundColor: 'rgba(123, 208, 255, 0.15)',
+    backgroundColor: "rgba(123, 208, 255, 0.15)",
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 6,
   },
   reflowPageBadgeText: {
-    color: '#0284c7',
+    color: "#0284c7",
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: "700",
     letterSpacing: 0.5,
   },
   reflowControls: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 8,
   },
   reflowBtn: {
-    backgroundColor: 'rgba(144, 143, 160, 0.15)',
+    backgroundColor: "rgba(144, 143, 160, 0.15)",
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 6,
   },
   reflowBtnText: {
-    color: '#475569',
+    color: "#475569",
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: "700",
   },
   reflowBodyText: {
     lineHeight: 28,
     letterSpacing: 0.2,
   },
   pageOuterWrapper: {
-    alignItems: 'center',
-    width: '100%',
+    alignItems: "center",
+    width: "100%",
   },
   pdfPaper: {
     borderRadius: 6,
     borderWidth: 1,
-    overflow: 'hidden',
-    shadowColor: '#000',
+    overflow: "hidden",
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.25,
     shadowRadius: 18,
     elevation: 8,
-    alignItems: 'center',
+    alignItems: "center",
   },
   canvasRelativeWrapper: {
-    position: 'relative',
-    cursor: 'crosshair' as any,
+    position: "relative",
+    cursor: "crosshair" as any,
   },
   paperFooter: {
-    width: '100%',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    width: "100%",
+    flexDirection: "row",
+    justifyContent: "space-between",
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderTopWidth: 1,
@@ -1556,24 +1737,24 @@ const styles = StyleSheet.create({
     fontSize: 10,
   },
   bottomNavStrip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    width: '100%',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    width: "100%",
     maxWidth: 580,
     marginTop: 16,
-    backgroundColor: '#0b1326',
+    backgroundColor: "#0b1326",
     borderWidth: 1,
-    borderColor: '#2d3449',
+    borderColor: "#2d3449",
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 12,
   },
   bottomNavBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 6,
-    backgroundColor: '#171f33',
+    backgroundColor: "#171f33",
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 8,
@@ -1582,28 +1763,28 @@ const styles = StyleSheet.create({
     opacity: 0.4,
   },
   bottomNavText: {
-    color: '#dae2fd',
+    color: "#dae2fd",
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   bottomNavTextDisabled: {
-    color: '#6b7280',
+    color: "#6b7280",
   },
   bottomNavPageLabel: {
-    color: '#dae2fd',
+    color: "#dae2fd",
     fontSize: 13,
   },
   continuousContainer: {
-    width: '100%',
+    width: "100%",
     maxWidth: 680,
     gap: 20,
-    alignItems: 'center',
+    alignItems: "center",
   },
   continuousPageCard: {
     borderRadius: 6,
     borderWidth: 1,
-    overflow: 'hidden',
-    shadowColor: '#000',
+    overflow: "hidden",
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.2,
     shadowRadius: 12,
@@ -1612,15 +1793,15 @@ const styles = StyleSheet.create({
   continuousPageHeader: {
     paddingHorizontal: 12,
     paddingVertical: 6,
-    backgroundColor: 'rgba(0, 0, 0, 0.05)',
+    backgroundColor: "rgba(0, 0, 0, 0.05)",
   },
   continuousPageNum: {
     fontSize: 10,
-    fontWeight: '600',
+    fontWeight: "600",
     letterSpacing: 0.5,
   },
   notePin: {
-    position: 'absolute',
+    position: "absolute",
     transform: [{ translateX: -12 }, { translateY: -12 }],
     zIndex: 30,
   },
@@ -1628,98 +1809,98 @@ const styles = StyleSheet.create({
     padding: 2,
   },
   noteEditorCard: {
-    position: 'absolute',
+    position: "absolute",
     top: 24,
     left: -80,
     width: 180,
-    backgroundColor: '#1e293b',
+    backgroundColor: "#1e293b",
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#475569',
+    borderColor: "#475569",
     padding: 8,
     zIndex: 50,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.4,
     shadowRadius: 8,
     elevation: 10,
   },
   noteEditorInput: {
-    color: '#ffffff',
+    color: "#ffffff",
     fontSize: 12,
     minHeight: 48,
-    outlineStyle: 'none' as any,
+    outlineStyle: "none" as any,
   },
   noteEditorActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
+    flexDirection: "row",
+    justifyContent: "flex-end",
     gap: 6,
     marginTop: 6,
   },
   noteSaveBtn: {
-    backgroundColor: '#0284c7',
+    backgroundColor: "#0284c7",
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 4,
   },
   noteSaveBtnText: {
-    color: '#ffffff',
+    color: "#ffffff",
     fontSize: 10,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   noteDeleteBtn: {
-    backgroundColor: '#ef4444',
+    backgroundColor: "#ef4444",
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 4,
   },
   noteDeleteBtnText: {
-    color: '#ffffff',
+    color: "#ffffff",
     fontSize: 10,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   stampOverlay: {
-    position: 'absolute',
+    position: "absolute",
     borderWidth: 2,
-    borderColor: '#059669',
+    borderColor: "#059669",
     borderRadius: 6,
     padding: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    alignItems: 'center',
+    backgroundColor: "rgba(255, 255, 255, 0.9)",
+    alignItems: "center",
     gap: 2,
-    transform: [{ rotate: '-8deg' }],
+    transform: [{ rotate: "-8deg" }],
     zIndex: 25,
   },
   stampOverlayTitle: {
-    color: '#059669',
+    color: "#059669",
     fontSize: 10,
-    fontWeight: '800',
+    fontWeight: "800",
     letterSpacing: 0.5,
   },
   stampOverlayTime: {
-    color: '#065f46',
+    color: "#065f46",
     fontSize: 8,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   thumbnailStrip: {
-    width: '100%',
+    width: "100%",
     maxWidth: 680,
     marginTop: 24,
     paddingTop: 16,
     borderTopWidth: 1,
-    borderTopColor: '#2d3449',
+    borderTopColor: "#2d3449",
   },
   thumbStripHeader: {
     marginBottom: 10,
   },
   thumbStripTitle: {
-    color: '#908fa0',
+    color: "#908fa0",
     fontSize: 10,
-    fontWeight: '700',
+    fontWeight: "700",
     letterSpacing: 1,
   },
   thumbStripSubtitle: {
-    color: '#64748b',
+    color: "#64748b",
     fontSize: 10,
     marginTop: 2,
   },
@@ -1731,95 +1912,95 @@ const styles = StyleSheet.create({
     width: 72,
     borderRadius: 6,
     borderWidth: 1.5,
-    borderColor: '#2d3449',
-    backgroundColor: '#171f33',
+    borderColor: "#2d3449",
+    backgroundColor: "#171f33",
     padding: 4,
-    alignItems: 'center',
+    alignItems: "center",
   },
   thumbCardActive: {
-    borderColor: '#7bd0ff',
-    backgroundColor: '#1f2e4d',
+    borderColor: "#7bd0ff",
+    backgroundColor: "#1f2e4d",
   },
   thumbImageWrap: {
     width: 62,
     height: 84,
-    backgroundColor: '#ffffff',
+    backgroundColor: "#ffffff",
     borderRadius: 4,
-    overflow: 'hidden',
-    alignItems: 'center',
-    justifyContent: 'center',
+    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
   },
   thumbPlaceholder: {
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     flex: 1,
   },
   thumbLabel: {
-    color: '#908fa0',
+    color: "#908fa0",
     fontSize: 10,
-    fontWeight: '600',
+    fontWeight: "600",
     marginTop: 4,
   },
   thumbLabelActive: {
-    color: '#7bd0ff',
-    fontWeight: '700',
+    color: "#7bd0ff",
+    fontWeight: "700",
   },
   actionBtnHighlight: {
-    backgroundColor: 'rgba(123, 208, 255, 0.12)',
-    borderColor: '#7bd0ff',
+    backgroundColor: "rgba(123, 208, 255, 0.12)",
+    borderColor: "#7bd0ff",
   },
   reflowFontSizeBadge: {
-    backgroundColor: '#171f33',
+    backgroundColor: "#171f33",
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 6,
     borderWidth: 1,
-    borderColor: '#2d3449',
-    justifyContent: 'center',
-    alignItems: 'center',
+    borderColor: "#2d3449",
+    justifyContent: "center",
+    alignItems: "center",
   },
   reflowFontSizeText: {
-    color: '#7bd0ff',
+    color: "#7bd0ff",
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: "700",
   },
   reflowOptionsBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 4,
-    backgroundColor: 'rgba(123, 208, 255, 0.15)',
+    backgroundColor: "rgba(123, 208, 255, 0.15)",
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 6,
     borderWidth: 1,
-    borderColor: 'rgba(123, 208, 255, 0.3)',
+    borderColor: "rgba(123, 208, 255, 0.3)",
     marginLeft: 4,
   },
   reflowOptionsBtnText: {
-    color: '#7bd0ff',
+    color: "#7bd0ff",
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: "700",
   },
   reflowParagraphsContainer: {
     gap: 16,
   },
   reflowParagraph: {
     letterSpacing: 0.2,
-    textAlign: 'left',
+    textAlign: "left",
   },
   floatingSideBtn: {
-    position: 'absolute',
-    top: '40%',
+    position: "absolute",
+    top: "40%",
     width: 38,
     height: 38,
     borderRadius: 19,
-    backgroundColor: 'rgba(15, 23, 42, 0.85)',
+    backgroundColor: "rgba(15, 23, 42, 0.85)",
     borderWidth: 1,
-    borderColor: '#334155',
-    justifyContent: 'center',
-    alignItems: 'center',
+    borderColor: "#334155",
+    justifyContent: "center",
+    alignItems: "center",
     zIndex: 60,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
@@ -1835,50 +2016,50 @@ const styles = StyleSheet.create({
     opacity: 0.25,
   },
   continuousContainerHorizontal: {
-    flexDirection: 'row',
+    flexDirection: "row",
     paddingHorizontal: 16,
     gap: 16,
-    alignItems: 'center',
+    alignItems: "center",
   },
   continuousPageCardHorizontal: {
     borderRadius: 8,
     borderWidth: 1,
-    overflow: 'hidden',
-    shadowColor: '#000',
+    overflow: "hidden",
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.25,
     shadowRadius: 14,
     elevation: 6,
   },
   dockedBottomBar: {
-    backgroundColor: '#0b1326',
+    backgroundColor: "#0b1326",
     borderTopWidth: 1,
-    borderTopColor: '#222f4c',
+    borderTopColor: "#222f4c",
     paddingHorizontal: 16,
     paddingVertical: 10,
     zIndex: 90,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: -4 },
     shadowOpacity: 0.35,
     shadowRadius: 12,
     elevation: 16,
   },
   bottomBarInner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     maxWidth: 900,
-    alignSelf: 'center',
-    width: '100%',
+    alignSelf: "center",
+    width: "100%",
     gap: 12,
   },
   dockPageNavGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#131b2e',
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#131b2e",
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#263554',
+    borderColor: "#263554",
     padding: 3,
     gap: 2,
   },
@@ -1886,9 +2067,9 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 7,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(255, 255, 255, 0.04)",
   },
   dockBtnDisabled: {
     opacity: 0.3,
@@ -1898,195 +2079,196 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   dockPagePillText: {
-    color: '#7bd0ff',
+    color: "#7bd0ff",
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: "700",
   },
   dockPageTotalText: {
-    color: '#908fa0',
+    color: "#908fa0",
     fontSize: 11,
-    fontWeight: '500',
+    fontWeight: "500",
   },
   viewModeBottomBtn: {
     flex: 1,
     maxWidth: 320,
-    backgroundColor: '#7bd0ff',
+    backgroundColor: "#7bd0ff",
     borderRadius: 10,
     paddingVertical: 7,
     paddingHorizontal: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#7bd0ff',
+    justifyContent: "center",
+    alignItems: "center",
+    shadowColor: "#7bd0ff",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 8,
     elevation: 4,
   },
   viewModeBottomInner: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 8,
   },
   viewModeBtnTitle: {
-    color: '#0d0096',
+    color: "#0d0096",
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: "800",
     letterSpacing: 0.2,
   },
   viewModePillMini: {
-    backgroundColor: 'rgba(13, 0, 150, 0.12)',
+    backgroundColor: "rgba(13, 0, 150, 0.12)",
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 6,
   },
   viewModePillMiniText: {
-    color: '#0d0096',
+    color: "#0d0096",
     fontSize: 10,
-    fontWeight: '700',
+    fontWeight: "700",
   },
   dockRightGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 6,
   },
   dockUtilityBtn: {
     height: 36,
     paddingHorizontal: 10,
     borderRadius: 8,
-    backgroundColor: '#131b2e',
+    backgroundColor: "#131b2e",
     borderWidth: 1,
-    borderColor: '#263554',
-    justifyContent: 'center',
-    alignItems: 'center',
+    borderColor: "#263554",
+    justifyContent: "center",
+    alignItems: "center",
   },
   dockUtilityBtnActive: {
-    backgroundColor: 'rgba(123, 208, 255, 0.15)',
-    borderColor: '#7bd0ff',
+    backgroundColor: "rgba(123, 208, 255, 0.15)",
+    borderColor: "#7bd0ff",
   },
   dockUtilityText: {
-    color: '#c7c4d7',
+    color: "#c7c4d7",
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: "700",
   },
   thumbImage: {
-    width: '100%',
-    height: '100%',
+    width: "100%",
+    height: "100%",
   },
   nativePdfFallbackCard: {
     paddingVertical: 48,
     paddingHorizontal: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     gap: 8,
   },
   nativePdfFallbackTitle: {
     fontSize: 15,
-    fontWeight: '700',
-    textAlign: 'center',
+    fontWeight: "700",
+    textAlign: "center",
   },
   nativePdfFallbackSubtitle: {
     fontSize: 12,
-    textAlign: 'center',
+    textAlign: "center",
   },
   nativeDocPage: {
     width: 580,
-    maxWidth: '100%',
+    maxWidth: "100%",
     minHeight: 680,
     borderRadius: 4,
     borderWidth: 1,
     padding: 24,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.35,
     shadowRadius: 16,
     elevation: 8,
   },
   nativeDocPageHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(144, 143, 160, 0.2)',
+    borderBottomColor: "rgba(144, 143, 160, 0.2)",
     paddingBottom: 12,
     marginBottom: 18,
   },
   nativeDocHeaderLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 6,
     flex: 1,
     marginRight: 8,
   },
   nativeDocHeaderTitle: {
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: "700",
     letterSpacing: 0.5,
-    textTransform: 'uppercase',
+    textTransform: "uppercase",
   },
   nativeDocBadge: {
-    backgroundColor: 'rgba(123, 208, 255, 0.15)',
+    backgroundColor: "rgba(123, 208, 255, 0.15)",
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 4,
   },
   nativeDocBadgeText: {
-    color: '#7bd0ff',
+    color: "#7bd0ff",
     fontSize: 10,
-    fontWeight: '800',
+    fontWeight: "800",
   },
   nativeDocBody: {
     flex: 1,
     gap: 14,
   },
   nativeDocHeading: {
-    fontWeight: '800',
+    fontWeight: "800",
     fontSize: 15,
     lineHeight: 22,
     letterSpacing: -0.2,
   },
   nativeDocParagraph: {
-    fontWeight: '400',
+    fontWeight: "400",
     fontSize: 13,
     lineHeight: 20,
-    textAlign: 'justify',
+    textAlign: "justify",
   },
   nativeDocEmpty: {
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     paddingVertical: 48,
   },
   nativeDocFooter: {
     marginTop: 24,
     paddingTop: 12,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(144, 143, 160, 0.2)',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    borderTopColor: "rgba(144, 143, 160, 0.2)",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
   },
   nativeDocFooterText: {
     fontSize: 9,
-    fontWeight: '700',
+    fontWeight: "700",
     letterSpacing: 0.8,
   },
   nativeContinuousBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 6,
-    backgroundColor: '#7bd0ff',
+    backgroundColor: "#7bd0ff",
     paddingHorizontal: 12,
     paddingVertical: 7,
     borderRadius: 6,
     marginTop: 8,
   },
   nativeContinuousBtnText: {
-    color: '#0d0096',
+    color: "#0d0096",
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: "700",
   },
   pdfViewer: {
-    maxWidth: '100%',
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: "100%",
+    maxWidth: "100%",
+    alignItems: "center",
+    justifyContent: "center",
   },
 });
