@@ -127,8 +127,6 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
         // Load into PDF.js
         const loadingTask = pdfjsLib.getDocument({
           data: item.data,
-          cMapUrl: 'https://unpkg.com/pdfjs-dist@4.10.38/cmaps/',
-          cMapPacked: true,
         });
 
         const loadedDoc = await loadingTask.promise;
@@ -156,9 +154,9 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
     };
   }, [activeId]);
 
-  // 2. Generate Thumbnails for All Pages
+  // 2. Generate Thumbnails Lazily (ONLY when user actually opens thumbnail panel)
   useEffect(() => {
-    if (!pdfDoc || numPages === 0) return;
+    if (!pdfDoc || numPages === 0 || !showThumbnails) return;
 
     let isMounted = true;
 
@@ -195,7 +193,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [pdfDoc, numPages, rotation]);
+  }, [pdfDoc, numPages, rotation, showThumbnails]);
 
   // 3. Extract Text Content when Reflow mode is active or page changes
   useEffect(() => {

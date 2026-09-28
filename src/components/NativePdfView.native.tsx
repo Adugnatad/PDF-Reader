@@ -8,7 +8,7 @@ import {
   Platform,
   Dimensions,
 } from 'react-native';
-import { WebView } from 'react-native-webview';
+import Pdf from 'react-native-pdf';
 import { Ionicons } from '@expo/vector-icons';
 import { getPdfLocalUri, openInNativeSystemViewer } from '../services/nativePdfOpener';
 
@@ -23,14 +23,13 @@ interface NativePdfViewProps {
   themeColors?: any;
   activeTool?: string;
   onOpenSystemViewer?: () => void;
+  onPageChanged?: (page: number, total: number) => void;
 }
 
 /**
- * Native Device Implementation (iOS & Android):
- * Directly renders the actual visual PDF without extracting text!
- * - iOS: WKWebView renders the PDF natively via CoreGraphics with high performance.
- * - Android: WebView renders the PDF directly via embedded canvas.
- * - One-tap action to open in Apple QuickLook or Android System Reader.
+ * Native PDF Viewer powered by react-native-pdf package
+ * Offers hardware-accelerated native PDF rendering on iOS and Android
+ * with continuous scroll, pinch-to-zoom, and page navigation.
  */
 export const NativePdfView: React.FC<NativePdfViewProps> = ({
   pdfBytes,
@@ -38,10 +37,12 @@ export const NativePdfView: React.FC<NativePdfViewProps> = ({
   currentPage = 1,
   numPages = 1,
   zoom = 1,
+  onPageChanged,
 }) => {
   const [localUri, setLocalUri] = useState<string | null>(null);
-  const [base64Content, setBase64Content] = useState<string>('');
   const [isPreparing, setIsPreparing] = useState(true);
+  const [pdfError, setPdfError] = useState<string | null>(null);
+  const [totalPages, setTotalPages] = useState<number>(numPages);
 
   useEffect(() => {
     let isCancelled = false;
@@ -50,31 +51,17 @@ export const NativePdfView: React.FC<NativePdfViewProps> = ({
     async function prepareFile() {
       try {
         setIsPreparing(true);
+        setPdfError(null);
 
-        // Convert bytes to base64
-        let base64 = '';
-        if (typeof Buffer !== 'undefined') {
-          base64 = Buffer.from(pdfBytes as any).toString('base64');
-        } else {
-          const bytes = pdfBytes instanceof Uint8Array ? pdfBytes : new Uint8Array(pdfBytes!);
-          let binary = '';
-          for (let i = 0; i < bytes.byteLength; i++) {
-            binary += String.fromCharCode(bytes[i]);
-          }
-          base64 = btoa(binary);
-        }
-
-        if (isCancelled) return;
-        setBase64Content(base64);
-
-        // Write to local cache directory for native file access
+        // Save bytes to native cache directory and obtain file:// URI
         const uri = await getPdfLocalUri(pdfBytes!, fileName);
         if (isCancelled) return;
         setLocalUri(uri);
         setIsPreparing(false);
       } catch (err: any) {
         if (isCancelled) return;
-        console.warn('Native view prepare notice:', err);
+        console.warn('Native PDF file prep notice:', err);
+        setPdfError(err?.message || 'Could not prepare file for native viewer');
         setIsPreparing(false);
       }
     }
@@ -92,68 +79,17 @@ export const NativePdfView: React.FC<NativePdfViewProps> = ({
   };
 
   const screenWidth = Dimensions.get('window').width;
-  const viewWidth = Math.min(screenWidth - 24, 620) * zoom;
-  const viewHeight = Math.max(500, Math.min(760, Dimensions.get('window').height * 0.75)) * zoom;
+  const viewWidth = Math.min(screenWidth - 24, 640) * zoom;
+  const viewHeight = Math.max(520, Math.min(780, Dimensions.get('window').height * 0.76)) * zoom;
 
   if (isPreparing) {
     return (
       <View style={[styles.loadingBox, { width: viewWidth, height: viewHeight }]}>
-        <ActivityIndicator size="large" color="#7bd0ff" />
-        <Text style={styles.loadingText}>Opening PDF directly on device...</Text>
+        <ActivityIndicator size="small" color="#7bd0ff" />
+        <Text style={styles.loadingText}>Opening PDF via react-native-pdf...</Text>
       </View>
     );
   }
-
-  // HTML Viewer for Android WebView
-  const htmlViewer = `
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=4.0, user-scalable=yes">
-        <style>
-          * { box-sizing: border-box; }
-          body, html { margin: 0; padding: 0; background: #0b1326; color: #fff; width: 100%; height: 100%; overflow: auto; }
-          #container { display: flex; flex-direction: column; align-items: center; padding: 12px; gap: 16px; }
-          canvas { max-width: 100%; height: auto; box-shadow: 0 4px 16px rgba(0,0,0,0.5); border-radius: 4px; }
-          .msg { text-align: center; color: #7bd0ff; font-family: sans-serif; padding: 24px; font-size: 14px; }
-        </style>
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-      </head>
-      <body>
-        <div id="container">
-          <div id="loading" class="msg">Loading PDF document...</div>
-        </div>
-        <script>
-          try {
-            const raw = atob("${base64Content}");
-            const uint8 = new Uint8Array(raw.length);
-            for (let i = 0; i < raw.length; i++) uint8[i] = raw.charCodeAt(i);
-            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-            pdfjsLib.getDocument({ data: uint8 }).promise.then(pdf => {
-              const loadingEl = document.getElementById('loading');
-              if (loadingEl) loadingEl.style.display = 'none';
-              const targetPage = Math.min(${currentPage}, pdf.numPages);
-              pdf.getPage(targetPage).then(page => {
-                const viewport = page.getViewport({ scale: 1.5 });
-                const canvas = document.createElement('canvas');
-                canvas.width = viewport.width;
-                canvas.height = viewport.height;
-                const ctx = canvas.getContext('2d');
-                document.getElementById('container').appendChild(canvas);
-                page.render({ canvasContext: ctx, viewport: viewport });
-              });
-            }).catch(e => {
-              const loadingEl = document.getElementById('loading');
-              if (loadingEl) loadingEl.innerText = 'Tap "Open in System Viewer" above to view';
-            });
-          } catch(e) {
-            const loadingEl = document.getElementById('loading');
-            if (loadingEl) loadingEl.innerText = 'Tap "Open in System Viewer" above to view';
-          }
-        </script>
-      </body>
-    </html>
-  `;
 
   return (
     <View style={[styles.wrapper, { width: viewWidth, height: viewHeight }]}>
@@ -162,7 +98,7 @@ export const NativePdfView: React.FC<NativePdfViewProps> = ({
         <View style={styles.badge}>
           <Ionicons name="document-text" size={14} color="#7bd0ff" />
           <Text style={styles.badgeText}>
-            Page {currentPage} of {numPages}
+            Page {currentPage} of {totalPages || numPages} • Native Engine
           </Text>
         </View>
         <TouchableOpacity
@@ -171,33 +107,54 @@ export const NativePdfView: React.FC<NativePdfViewProps> = ({
           activeOpacity={0.75}
         >
           <Ionicons name="open-outline" size={14} color="#0d0096" />
-          <Text style={styles.systemBtnText}>Open with System Viewer</Text>
+          <Text style={styles.systemBtnText}>System Viewer</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Embedded Native Viewer: iOS uses Apple CoreGraphics via WKWebView; Android uses canvas */}
-      <View style={styles.webViewContainer}>
-        {Platform.OS === 'ios' && localUri ? (
-          <WebView
-            source={{ uri: localUri }}
-            style={styles.webView}
-            originWhitelist={['*']}
-            allowFileAccess={true}
-            allowFileAccessFromFileURLs={true}
-            allowUniversalAccessFromFileURLs={true}
-            scalesPageToFit={true}
-            bounces={false}
+      {/* Main Native PDF View using react-native-pdf */}
+      <View style={styles.pdfContainer}>
+        {localUri && !pdfError ? (
+          <Pdf
+            source={{ uri: localUri, cache: true }}
+            page={currentPage}
+            scale={zoom}
+            horizontal={false}
+            enablePaging={false}
+            enableRTL={false}
+            enableAnnotationRendering={true}
+            trustAllCerts={false}
+            fitPolicy={0} // fit width
+            onLoadComplete={(numberOfPages) => {
+              setTotalPages(numberOfPages);
+            }}
+            onPageChanged={(page, numberOfPages) => {
+              setTotalPages(numberOfPages);
+              if (onPageChanged) {
+                onPageChanged(page, numberOfPages);
+              }
+            }}
+            onError={(error) => {
+              console.warn('react-native-pdf load error:', error);
+              setPdfError(typeof error === 'string' ? error : (error as any)?.message || 'Render error');
+            }}
+            style={styles.pdfView}
           />
         ) : (
-          <WebView
-            source={{ html: htmlViewer }}
-            style={styles.webView}
-            originWhitelist={['*']}
-            allowFileAccess={true}
-            javaScriptEnabled={true}
-            domStorageEnabled={true}
-            scalesPageToFit={true}
-          />
+          <View style={styles.fallbackBox}>
+            <Ionicons name="document-text-outline" size={38} color="#7bd0ff" />
+            <Text style={styles.fallbackTitle}>Ready to Read</Text>
+            <Text style={styles.fallbackSubtitle}>
+              {fileName} ({((pdfBytes as Uint8Array)?.byteLength || 0) > 0 ? `${Math.round(((pdfBytes as Uint8Array).byteLength) / 1024)} KB` : 'PDF Document'})
+            </Text>
+            <TouchableOpacity
+              style={styles.fallbackBtn}
+              onPress={handleOpenSystem}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="open-outline" size={16} color="#0d0096" />
+              <Text style={styles.fallbackBtnText}>Open with Native System Reader</Text>
+            </TouchableOpacity>
+          </View>
         )}
       </View>
     </View>
@@ -251,13 +208,15 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
   },
-  webViewContainer: {
+  pdfContainer: {
     flex: 1,
     backgroundColor: '#0b1326',
   },
-  webView: {
+  pdfView: {
     flex: 1,
-    backgroundColor: 'transparent',
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#0b1326',
   },
   loadingBox: {
     alignItems: 'center',
@@ -266,11 +225,42 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
     borderColor: '#263554',
-    gap: 12,
+    gap: 8,
   },
   loadingText: {
     color: '#7bd0ff',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
+  },
+  fallbackBox: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+    gap: 12,
+  },
+  fallbackTitle: {
+    color: '#f0f3ff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  fallbackSubtitle: {
+    color: '#908fa0',
+    fontSize: 12,
+  },
+  fallbackBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#7bd0ff',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+    marginTop: 8,
+  },
+  fallbackBtnText: {
+    color: '#0d0096',
+    fontSize: 13,
+    fontWeight: '700',
   },
 });

@@ -21,7 +21,11 @@ class PdfStoreService {
   private listeners: Set<() => void> = new Set();
 
   constructor() {
-    // Initial device documents can be loaded/indexed
+    // Warm up the primary sample documents in background so they open with 0ms delay
+    setTimeout(() => {
+      this.getPdfData('Q4_Tax_Filing_Signed.pdf').catch(() => {});
+      this.getPdfData('Contract_Vendor_Agreement.pdf').catch(() => {});
+    }, 50);
   }
 
   public subscribe(listener: () => void): () => void {

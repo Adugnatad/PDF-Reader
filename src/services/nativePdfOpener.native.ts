@@ -1,18 +1,9 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
+import { fastUint8ToBase64 } from '../utils/fastBase64';
 
-function arrayBufferToBase64(buffer: ArrayBuffer | Uint8Array): string {
-  if (typeof Buffer !== 'undefined') {
-    return Buffer.from(buffer as any).toString('base64');
-  }
-  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
-  let binary = '';
-  const len = bytes.byteLength;
-  for (let i = 0; i < len; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary);
-}
+// Cache written URIs so we don't rewrite the same PDF repeatedly
+const uriCache = new Map<string, string>();
 
 /**
  * Checks if native device sharing/quicklook is available
@@ -27,25 +18,33 @@ export async function isNativeSystemViewerAvailable(): Promise<boolean> {
 
 /**
  * Saves the PDF bytes to a local file in the app cache directory
- * and returns the native file:// URI.
+ * and returns the native file:// URI with near-instant caching.
  */
 export async function getPdfLocalUri(pdfBytes: Uint8Array | ArrayBuffer, fileName: string): Promise<string> {
+  const bytes = pdfBytes instanceof Uint8Array ? pdfBytes : new Uint8Array(pdfBytes);
+  const cacheKey = `${fileName}_${bytes.byteLength}`;
+
+  if (uriCache.has(cacheKey)) {
+    return uriCache.get(cacheKey)!;
+  }
+
   const safeName = (fileName || 'document.pdf').replace(/[^a-zA-Z0-9._-]/g, '_');
   const targetName = safeName.endsWith('.pdf') ? safeName : `${safeName}.pdf`;
-  const fileUri = `${FileSystem.cacheDirectory}pdf_${Date.now()}_${targetName}`;
+  const fileUri = `${FileSystem.cacheDirectory}${targetName}`;
 
-  const base64 = arrayBufferToBase64(pdfBytes);
+  const base64 = fastUint8ToBase64(bytes);
   await FileSystem.writeAsStringAsync(fileUri, base64, {
     encoding: FileSystem.EncodingType.Base64,
   });
 
+  uriCache.set(cacheKey, fileUri);
   return fileUri;
 }
 
 /**
  * Directly opens the PDF in the native mobile device's system PDF viewer
  * (Apple QuickLook on iOS, Google Drive / System PDF Viewer on Android)
- * with zero text extraction required!
+ * with zero text extraction and zero wait!
  */
 export async function openInNativeSystemViewer(pdfBytes: Uint8Array | ArrayBuffer, fileName: string): Promise<boolean> {
   try {
