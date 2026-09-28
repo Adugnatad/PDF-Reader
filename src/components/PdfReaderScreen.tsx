@@ -893,7 +893,10 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                     onError={(err) => {
                       console.warn("react-native-pdf view note:", err);
                     }}
-                    style={[styles.pdfViewer, { width: pageWidth, height: pageHeight }]}
+                    style={[
+                      styles.pdfViewer,
+                      { width: pageWidth, height: pageHeight },
+                    ]}
                   />
                 ) : (
                   <ActivityIndicator size="small" color="#7bd0ff" />
@@ -1004,16 +1007,6 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                     </View>
                   ))}
               </View>
-
-              {/* Bottom Page Bar */}
-              <View style={[styles.paperFooter, { borderTopColor: t.border }]}>
-                <Text style={[styles.paperFooterText, { color: t.muted }]}>
-                  {activeTitle} • Page {currentPage} of {numPages}
-                </Text>
-                <Text style={[styles.paperFooterText, { color: t.muted }]}>
-                  DocuFlow PDF Engine
-                </Text>
-              </View>
             </View>
           </View>
         )}
@@ -1077,19 +1070,6 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                         >
                           Page {p} of {numPages}
                         </Text>
-                        <TouchableOpacity
-                          style={styles.nativeContinuousBtn}
-                          onPress={handleOpenSystemViewer}
-                        >
-                          <Ionicons
-                            name="open-outline"
-                            size={14}
-                            color="#0d0096"
-                          />
-                          <Text style={styles.nativeContinuousBtnText}>
-                            Open with System Viewer
-                          </Text>
-                        </TouchableOpacity>
                       </View>
                     )}
                   </View>
