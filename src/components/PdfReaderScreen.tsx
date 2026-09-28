@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -17,7 +17,8 @@ import { pdfStore } from '../services/pdfStore';
 import { pdfjsLib } from '../services/pdfService';
 import { ViewModeModal } from './ViewModeModal';
 import { pickPdfFromDevice } from '../services/nativeFilePicker';
-import { NativePdfView } from './NativePdfView';
+import Pdf from 'react-native-pdf';
+import { fastUint8ToBase64 } from '../utils/fastBase64';
 import { openInNativeSystemViewer } from '../services/nativePdfOpener';
 
 interface PdfReaderScreenProps {
@@ -100,6 +101,13 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
 
   // Thumbnails Data Cache (data URLs)
   const [thumbnails, setThumbnails] = useState<Record<number, string>>({});
+
+  // Compute base64 source for react-native-pdf
+  const pdfSource = useMemo(() => {
+    if (!pdfBytes) return { uri: '' };
+    const b64 = fastUint8ToBase64(pdfBytes);
+    return { uri: `data:application/pdf;base64,${b64}`, cache: true };
+  }, [pdfBytes]);
 
   // Canvas & DOM Refs (portable across React Native and Web)
   const canvasRef = useRef<any>(null);
@@ -819,19 +827,30 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                     }
                   : {})}
               >
-                {/* Visual PDF Document View: Web Canvas or Direct Native Embedded Viewer */}
-                <NativePdfView
-                  canvasRef={canvasRef}
-                  drawCanvasRef={drawCanvasRef}
-                  activeTool={activeTool}
-                  pdfBytes={pdfBytes}
-                  fileName={activeTitle}
-                  currentPage={currentPage}
-                  numPages={numPages}
-                  zoom={zoom}
-                  themeColors={t}
-                  onOpenSystemViewer={handleOpenSystemViewer}
-                />
+                {/* Visual PDF Document View: Using react-native-pdf Package */}
+                {pdfSource.uri ? (
+                  <Pdf
+                    ref={canvasRef as any}
+                    source={pdfSource}
+                    page={currentPage}
+                    scale={zoom}
+                    horizontal={readingDirection === 'horizontal'}
+                    onLoadComplete={(loadedPages) => {
+                      setNumPages(loadedPages);
+                      setIsLoading(false);
+                    }}
+                    onPageChanged={(page, total) => {
+                      setCurrentPage(page);
+                      setNumPages(total);
+                    }}
+                    onError={(err) => {
+                      console.warn('react-native-pdf view note:', err);
+                    }}
+                    style={styles.pdfViewer}
+                  />
+                ) : (
+                  <ActivityIndicator size="small" color="#7bd0ff" />
+                )}
 
                 {/* Freehand Drawing Overlay Canvas */}
                 {Platform.OS === 'web' && (
@@ -2064,5 +2083,10 @@ const styles = StyleSheet.create({
     color: '#0d0096',
     fontSize: 12,
     fontWeight: '700',
+  },
+  pdfViewer: {
+    maxWidth: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

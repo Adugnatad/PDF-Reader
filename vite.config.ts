@@ -15,6 +15,7 @@ export default defineConfig(() => {
         'react-native': 'react-native-web',
         'expo-router': path.resolve(import.meta.dirname, 'src/router-bridge.tsx'),
         '@expo/vector-icons': path.resolve(import.meta.dirname, 'src/expo-icons.tsx'),
+        'react-native-pdf': path.resolve(import.meta.dirname, 'src/components/react-native-pdf-web.tsx'),
       },
       extensions: ['.web.tsx', '.web.ts', '.web.jsx', '.web.js', '.tsx', '.ts', '.jsx', '.js'],
     },
