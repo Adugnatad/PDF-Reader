@@ -51,13 +51,14 @@ export interface PdfProps {
 /**
  * Web Implementation of react-native-pdf
  * Provides 100% API compatibility with `import Pdf from 'react-native-pdf'`
- * rendering via HTML5 canvas with sharp devicePixelRatio scaling.
+ * rendering via HTML5 canvas, edge-to-edge full width with sharp devicePixelRatio scaling.
  */
 const Pdf = forwardRef<any, PdfProps>((props, forwardedRef) => {
   const {
     source,
     page = 1,
     scale = 1,
+    fitPolicy = 0,
     style,
     onLoadComplete,
     onPageChanged,
@@ -70,6 +71,7 @@ const Pdf = forwardRef<any, PdfProps>((props, forwardedRef) => {
   const currentRenderTask = useRef<any>(null);
   const [loading, setLoading] = useState(true);
   const [doc, setDoc] = useState<any>(null);
+  const [containerWidth, setContainerWidth] = useState<number>(0);
 
   const uri = typeof source === 'object' && source?.uri ? source.uri : '';
 
@@ -131,15 +133,27 @@ const Pdf = forwardRef<any, PdfProps>((props, forwardedRef) => {
         const pageObj = await doc.getPage(targetPage);
         if (isCancelled) return;
 
-        const viewport = pageObj.getViewport({ scale });
+        const baseViewport = pageObj.getViewport({ scale: 1.0 });
+
+        // Calculate fit-to-width scale so the PDF fills the screen completely
+        let effectiveScale = scale;
+        const parentWidth =
+          containerWidth ||
+          (typeof window !== 'undefined' ? window.innerWidth : 600);
+        if (fitPolicy === 0 && parentWidth > 0 && baseViewport.width > 0) {
+          effectiveScale = (parentWidth / baseViewport.width) * scale;
+        }
+
+        const viewport = pageObj.getViewport({ scale: effectiveScale });
         const canvas = canvasRef.current;
         if (!canvas) return;
 
-        const pixelRatio = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
+        const pixelRatio =
+          (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
         canvas.width = Math.floor(viewport.width * pixelRatio);
         canvas.height = Math.floor(viewport.height * pixelRatio);
-        canvas.style.width = `${Math.floor(viewport.width)}px`;
-        canvas.style.height = `${Math.floor(viewport.height)}px`;
+        canvas.style.width = '100%';
+        canvas.style.height = 'auto';
 
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
@@ -166,10 +180,18 @@ const Pdf = forwardRef<any, PdfProps>((props, forwardedRef) => {
         currentRenderTask.current.cancel();
       }
     };
-  }, [doc, page, scale]);
+  }, [doc, page, scale, containerWidth, fitPolicy]);
 
   return (
-    <View style={[styles.container, style]}>
+    <View
+      style={[styles.container, style]}
+      onLayout={(e) => {
+        const w = e.nativeEvent.layout.width;
+        if (w > 0 && Math.abs(w - containerWidth) > 2) {
+          setContainerWidth(w);
+        }
+      }}
+    >
       {loading && (
         <View style={styles.loader}>
           {renderActivityIndicator ? (
@@ -183,6 +205,8 @@ const Pdf = forwardRef<any, PdfProps>((props, forwardedRef) => {
         ref={canvasRef}
         style={{
           display: loading ? 'none' : 'block',
+          width: '100%',
+          height: 'auto',
           maxWidth: '100%',
         }}
       />
@@ -194,9 +218,11 @@ export default Pdf;
 
 const styles = StyleSheet.create({
   container: {
+    width: '100%',
+    flex: 1,
     position: 'relative',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
   },
   loader: {
     padding: 24,

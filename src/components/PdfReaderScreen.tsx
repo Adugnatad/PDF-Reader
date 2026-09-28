@@ -119,11 +119,6 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
   // Thumbnails Data Cache (data URLs)
   const [thumbnails, setThumbnails] = useState<Record<number, string>>({});
 
-  // Responsive concrete dimensions for PDF page (A4 ratio 595:842)
-  const windowDims = Dimensions.get("window");
-  const pageWidth = Math.min(windowDims.width - 24, 620) * zoom;
-  const pageHeight = Math.round(pageWidth * (842 / 595));
-
   // Source for react-native-pdf (Web uses data URI, native devices can use local file URI or base64 data URI)
   const pdfSource = useMemo(() => {
     if (!pdfBytes) return { uri: "" };
@@ -648,35 +643,35 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
     onShowToast(`Markups cleared for Page ${currentPage}`);
   };
 
-  // Color & Theme Styling
+  // Color & Theme Styling (PDF page seamlessly fills the screen)
   const getThemeColors = () => {
     if (theme === "light") {
       return {
-        bg: "#f8fafc",
+        bg: "#ffffff",
         paperBg: "#ffffff",
         text: "#0f172a",
         muted: "#64748b",
-        border: "#e2e8f0",
+        border: "transparent",
         canvasFilter: "none",
       };
     }
     if (theme === "night") {
       return {
         bg: "#080d1a",
-        paperBg: "#131b2e",
+        paperBg: "#080d1a",
         text: "#dae2fd",
         muted: "#908fa0",
-        border: "#2d3449",
+        border: "transparent",
         canvasFilter: "invert(0.92) hue-rotate(180deg) brightness(0.95)",
       };
     }
     // Sepia
     return {
-      bg: "#f5efe6",
+      bg: "#fdfbf7",
       paperBg: "#fdfbf7",
       text: "#1a1c1e",
       muted: "#8c887e",
-      border: "#e2ddd3",
+      border: "transparent",
       canvasFilter: "sepia(0.35) contrast(0.95) brightness(0.96)",
     };
   };
@@ -696,8 +691,11 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
 
       {/* Main Document Content */}
       <ScrollView
-        style={[styles.mainScrollView, { backgroundColor: t.bg }]}
-        contentContainerStyle={styles.mainScrollContent}
+        style={[styles.mainScrollView, { backgroundColor: t.paperBg }]}
+        contentContainerStyle={[
+          styles.mainScrollContent,
+          !reflow && styles.mainScrollContentPdf,
+        ]}
       >
         {/* Loading State */}
         {isLoading && (
@@ -848,9 +846,8 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                 styles.pdfPaper,
                 {
                   backgroundColor: t.paperBg,
-                  borderColor: t.border,
-                  width: pageWidth,
-                  minHeight: pageHeight,
+                  borderColor: "transparent",
+                  width: zoom > 1 ? `${Math.round(zoom * 100)}%` : "100%",
                 },
               ]}
             >
@@ -859,8 +856,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                 style={[
                   styles.canvasRelativeWrapper,
                   {
-                    width: pageWidth,
-                    height: pageHeight,
+                    width: "100%",
                     filter: t.canvasFilter as any,
                   },
                 ]}
@@ -881,6 +877,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                     source={pdfSource}
                     page={currentPage}
                     scale={zoom}
+                    fitPolicy={0}
                     horizontal={readingDirection === "horizontal"}
                     onLoadComplete={(loadedPages) => {
                       setNumPages(loadedPages);
@@ -893,10 +890,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                     onError={(err) => {
                       console.warn("react-native-pdf view note:", err);
                     }}
-                    style={[
-                      styles.pdfViewer,
-                      { width: pageWidth, height: pageHeight },
-                    ]}
+                    style={styles.pdfViewer}
                   />
                 ) : (
                   <ActivityIndicator size="small" color="#7bd0ff" />
@@ -910,8 +904,8 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                       position: "absolute",
                       top: 0,
                       left: 0,
-                      width: pageWidth,
-                      height: pageHeight,
+                      width: "100%",
+                      height: "100%",
                       pointerEvents:
                         activeTool === "pen" || activeTool === "highlighter"
                           ? "auto"
@@ -1561,6 +1555,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingBottom: 64,
   },
+  mainScrollContentPdf: {
+    padding: 0,
+    paddingTop: 0,
+    paddingBottom: 0,
+    paddingHorizontal: 0,
+    alignItems: "stretch",
+    width: "100%",
+    flexGrow: 1,
+  },
   loadingContainer: {
     paddingVertical: 60,
     alignItems: "center",
@@ -1660,21 +1663,20 @@ const styles = StyleSheet.create({
   pageOuterWrapper: {
     alignItems: "center",
     width: "100%",
+    flex: 1,
   },
   pdfPaper: {
-    borderRadius: 6,
-    borderWidth: 1,
+    width: "100%",
+    flex: 1,
     overflow: "hidden",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.25,
-    shadowRadius: 18,
-    elevation: 8,
     alignItems: "center",
   },
   canvasRelativeWrapper: {
+    width: "100%",
+    flex: 1,
     position: "relative",
     cursor: "crosshair" as any,
+    alignItems: "center",
   },
   paperFooter: {
     width: "100%",
