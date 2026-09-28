@@ -5,29 +5,25 @@
     "version": "1.0.0",
     "scheme": "docuflow",
     "orientation": "portrait",
-    "icon": "./public/assets/aistudio/icon.png",
     "userInterfaceStyle": "dark",
     "splash": {
       "backgroundColor": "#0b1326"
     },
-    "assetBundlePatterns": [
-      "**/*"
-    ],
+    "assetBundlePatterns": ["**/*"],
     "ios": {
       "supportsTablet": true
     },
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#0b1326"
-      }
+      },
+      "package": "com.adugna12.docuflowconsole"
     },
     "web": {
       "favicon": "./public/assets/aistudio/favicon.png",
       "bundler": "metro"
     },
-    "plugins": [
-      "expo-router"
-    ],
+    "plugins": ["expo-router"],
     "experiments": {
       "typedRoutes": true
     }
