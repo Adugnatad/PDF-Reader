@@ -1,6 +1,12 @@
-import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import React, { useState } from "react";
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  Platform,
+} from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 
 interface HeaderProps {
   title?: string;
@@ -12,7 +18,7 @@ interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({
-  title = 'Document Reader',
+  title = "Document Reader",
   onBack,
   showBack = true,
   onShowToast,
@@ -42,18 +48,6 @@ export const Header: React.FC<HeaderProps> = ({
         </View>
 
         <View style={styles.rightGroup}>
-          {onOpenSystemViewer && (
-            <TouchableOpacity
-              accessibilityLabel="Open in System Viewer"
-              onPress={onOpenSystemViewer}
-              style={styles.openHeaderBtn}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="open-outline" size={15} color="#7bd0ff" />
-              <Text style={styles.openHeaderBtnText}>System Viewer</Text>
-            </TouchableOpacity>
-          )}
-
           {onOpenFileFromDevice && !onOpenSystemViewer && (
             <TouchableOpacity
               accessibilityLabel="Open document from device"
@@ -100,7 +94,11 @@ export const Header: React.FC<HeaderProps> = ({
                   style={styles.dropdownItem}
                   activeOpacity={0.7}
                 >
-                  <Ionicons name="folder-open-outline" size={16} color="#7bd0ff" />
+                  <Ionicons
+                    name="folder-open-outline"
+                    size={16}
+                    color="#7bd0ff"
+                  />
                   <Text style={styles.dropdownText}>Open File from Device</Text>
                 </TouchableOpacity>
               )}
@@ -108,19 +106,23 @@ export const Header: React.FC<HeaderProps> = ({
               <TouchableOpacity
                 onPress={() => {
                   setMenuOpen(false);
-                  onShowToast('Document encrypted with 256-bit AES');
+                  onShowToast("Document encrypted with 256-bit AES");
                 }}
                 style={styles.dropdownItem}
                 activeOpacity={0.7}
               >
-                <Ionicons name="shield-checkmark-outline" size={16} color="#7bd0ff" />
+                <Ionicons
+                  name="shield-checkmark-outline"
+                  size={16}
+                  color="#7bd0ff"
+                />
                 <Text style={styles.dropdownText}>Audit Verification</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
                 onPress={() => {
                   setMenuOpen(false);
-                  onShowToast('Sharing link copied to clipboard');
+                  onShowToast("Sharing link copied to clipboard");
                 }}
                 style={styles.dropdownItem}
                 activeOpacity={0.7}
@@ -132,10 +134,10 @@ export const Header: React.FC<HeaderProps> = ({
               <TouchableOpacity
                 onPress={() => {
                   setMenuOpen(false);
-                  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+                  if (Platform.OS === "web" && typeof window !== "undefined") {
                     window.print();
                   } else {
-                    onShowToast('Printing document...');
+                    onShowToast("Printing document...");
                   }
                 }}
                 style={styles.dropdownItem}
@@ -148,12 +150,16 @@ export const Header: React.FC<HeaderProps> = ({
               <TouchableOpacity
                 onPress={() => {
                   setMenuOpen(false);
-                  onShowToast('File hash verified: SHA-256 Valid');
+                  onShowToast("File hash verified: SHA-256 Valid");
                 }}
                 style={[styles.dropdownItem, styles.borderTop]}
                 activeOpacity={0.7}
               >
-                <Ionicons name="document-text-outline" size={16} color="#908fa0" />
+                <Ionicons
+                  name="document-text-outline"
+                  size={16}
+                  color="#908fa0"
+                />
                 <Text style={styles.dropdownText}>Metadata & Properties</Text>
               </TouchableOpacity>
             </View>
@@ -166,24 +172,24 @@ export const Header: React.FC<HeaderProps> = ({
 
 const styles = StyleSheet.create({
   headerContainer: {
-    backgroundColor: 'rgba(11, 19, 38, 0.95)',
+    backgroundColor: "rgba(11, 19, 38, 0.95)",
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(45, 52, 73, 0.6)',
+    borderBottomColor: "rgba(45, 52, 73, 0.6)",
     zIndex: 50,
   },
   innerRow: {
     height: 64,
     paddingHorizontal: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     maxWidth: 960,
-    width: '100%',
-    alignSelf: 'center',
+    width: "100%",
+    alignSelf: "center",
   },
   leftGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     flex: 1,
     marginRight: 8,
   },
@@ -191,34 +197,34 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#171f33',
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#171f33",
     marginRight: 8,
   },
   titleText: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#dae2fd',
+    fontWeight: "600",
+    color: "#dae2fd",
     letterSpacing: -0.3,
     flexShrink: 1,
   },
   rightGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    position: 'relative',
+    flexDirection: "row",
+    alignItems: "center",
+    position: "relative",
   },
   dropdownMenu: {
-    position: 'absolute',
+    position: "absolute",
     top: 48,
     right: 0,
     width: 210,
-    backgroundColor: '#171f33',
+    backgroundColor: "#171f33",
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#2d3449',
+    borderColor: "#2d3449",
     paddingVertical: 6,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.4,
     shadowRadius: 15,
@@ -226,37 +232,37 @@ const styles = StyleSheet.create({
     zIndex: 100,
   },
   dropdownItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     paddingHorizontal: 14,
     paddingVertical: 10,
     gap: 10,
   },
   borderTop: {
     borderTopWidth: 1,
-    borderTopColor: 'rgba(45, 52, 73, 0.7)',
+    borderTopColor: "rgba(45, 52, 73, 0.7)",
     marginTop: 4,
     paddingTop: 8,
   },
   dropdownText: {
-    color: '#dae2fd',
+    color: "#dae2fd",
     fontSize: 13,
   },
   openHeaderBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 4,
-    backgroundColor: 'rgba(123, 208, 255, 0.12)',
+    backgroundColor: "rgba(123, 208, 255, 0.12)",
     borderWidth: 1,
-    borderColor: '#7bd0ff',
+    borderColor: "#7bd0ff",
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 8,
     marginRight: 6,
   },
   openHeaderBtnText: {
-    color: '#7bd0ff',
+    color: "#7bd0ff",
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: "700",
   },
 });

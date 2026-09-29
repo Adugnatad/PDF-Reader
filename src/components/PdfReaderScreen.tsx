@@ -1207,7 +1207,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
       <View style={styles.dockedBottomBar}>
         <View style={styles.bottomBarInner}>
           {/* Page Navigation Controls */}
-          <View style={styles.dockPageNavGroup}>
+          {/* <View style={styles.dockPageNavGroup}>
             <TouchableOpacity
               onPress={handlePrevPage}
               disabled={currentPage <= 1 || viewMode === "continuous"}
@@ -1268,20 +1268,28 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                 }
               />
             </TouchableOpacity>
-          </View>
+          </View> */}
 
           {/* PROMINENT VIEW MODE BUTTON AT BOTTOM */}
-          <TouchableOpacity
+          {/* <TouchableOpacity
             onPress={() => setShowViewModeModal(true)}
             style={styles.viewModeBottomBtn}
             activeOpacity={0.8}
             accessibilityLabel="Open View Mode Options"
-          >
-            <View style={styles.viewModeBottomInner}>
-              <MaterialIcons name="book" size={16} color="#0d0096" />
-              <Text style={styles.viewModeBtnTitle}>View Mode</Text>
-            </View>
+          > */}
+          <TouchableOpacity style={styles.viewModeBottomInner}>
+            <MaterialIcons name="book" size={23} color="#fff" />
+            <Text style={styles.viewModeBtnTitle}>View Mode</Text>
           </TouchableOpacity>
+          <TouchableOpacity style={styles.viewModeBottomInner}>
+            <MaterialIcons name="edit" size={23} color="#fff" />
+            <Text style={styles.viewModeBtnTitle}>Edit</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.viewModeBottomInner}>
+            <MaterialIcons name="settings" size={23} color="#fff" />
+            <Text style={styles.viewModeBtnTitle}>Settings</Text>
+          </TouchableOpacity>
+          {/* </TouchableOpacity> */}
         </View>
       </View>
 
@@ -2057,12 +2065,12 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   viewModeBottomInner: {
-    flexDirection: "row",
+    flexDirection: "column",
     alignItems: "center",
     gap: 8,
   },
   viewModeBtnTitle: {
-    color: "#0d0096",
+    color: "#fff",
     fontSize: 12,
     fontWeight: "800",
     letterSpacing: 0.2,
