@@ -1,11 +1,15 @@
 import { DocFile } from '../types';
-import { INITIAL_FILES } from '../data/mockData';
 import {
   generateTaxFilingPdf,
   generateContractPdf,
   generateExecutiveAuditPdf,
   generateDynamicDevicePdf,
 } from './samplePdfGenerator';
+import {
+  autoScanDevicePdfs,
+  readNativePdfBytes,
+  DiscoveredPdfItem,
+} from './nativeFilePicker';
 
 interface StoredPdf {
   id: string;
@@ -13,19 +17,21 @@ interface StoredPdf {
   data: Uint8Array | ArrayBuffer;
   pageCount?: number;
   uploadedAt: string;
+  nativeUri?: string;
 }
 
 class PdfStoreService {
   private pdfCache: Map<string, StoredPdf> = new Map();
   private userFiles: DocFile[] = [];
+  private nativeUriMap: Map<string, string> = new Map();
   private listeners: Set<() => void> = new Set();
+  private isScanning = false;
 
   constructor() {
-    // Warm up the primary sample documents in background so they open with 0ms delay
+    // Automatically scan native device for PDF files on startup
     setTimeout(() => {
-      this.getPdfData('Q4_Tax_Filing_Signed.pdf').catch(() => {});
-      this.getPdfData('Contract_Vendor_Agreement.pdf').catch(() => {});
-    }, 50);
+      this.scanDeviceAutomatically().catch(() => {});
+    }, 100);
   }
 
   public subscribe(listener: () => void): () => void {
@@ -37,26 +43,151 @@ class PdfStoreService {
     this.listeners.forEach((l) => l());
   }
 
-  public async getPdfData(docIdOrTitle: string): Promise<{ data: Uint8Array | ArrayBuffer; name: string; id: string }> {
-    // 1. Check exact id match
+  /**
+   * Registers automatically scanned PDFs from native device filesystem
+   */
+  public registerDiscoveredDevicePdfs(items: DiscoveredPdfItem[]): DocFile[] {
+    let changed = false;
+
+    for (const item of items) {
+      // Check if already in userFiles (by id or uri or name)
+      const existing = this.userFiles.find(
+        (f) =>
+          f.id === item.id ||
+          (f.name === item.name && this.nativeUriMap.get(f.id) === item.uri)
+      );
+      if (existing) continue;
+
+      const sizeInMb = (item.size / (1024 * 1024)).toFixed(1);
+      const sizeStr =
+        item.size > 1024 * 1024
+          ? `${sizeInMb} MB`
+          : `${Math.max(1, Math.round(item.size / 1024))} KB`;
+
+      let modStr = 'On Device';
+      if (item.lastModified) {
+        const d = new Date(item.lastModified);
+        modStr = d.toLocaleDateString(undefined, {
+          month: 'short',
+          day: 'numeric',
+        });
+      }
+
+      const docFile: DocFile = {
+        id: item.id,
+        name: item.name,
+        type: 'pdf',
+        size: sizeStr,
+        modified: modStr,
+        source: 'Device Storage',
+        status: 'Device',
+        pageCount: 1,
+        folder: item.folder || 'Documents',
+        favorite: false,
+        selected: false,
+      };
+
+      this.nativeUriMap.set(item.id, item.uri);
+      this.nativeUriMap.set(item.name, item.uri);
+
+      this.userFiles.push(docFile);
+      changed = true;
+    }
+
+    if (changed) {
+      this.notify();
+    }
+    return this.userFiles;
+  }
+
+  /**
+   * Automatically scans device storage (Downloads, Documents, etc.) for PDFs
+   */
+  public async scanDeviceAutomatically(): Promise<DocFile[]> {
+    if (this.isScanning) return this.userFiles;
+    this.isScanning = true;
+
+    try {
+      const items = await autoScanDevicePdfs();
+      if (items && items.length > 0) {
+        this.registerDiscoveredDevicePdfs(items);
+      }
+    } catch (err) {
+      console.warn('Auto scan device error:', err);
+    } finally {
+      this.isScanning = false;
+    }
+
+    return this.userFiles;
+  }
+
+  public getNativeUri(idOrTitle: string): string | undefined {
+    return this.nativeUriMap.get(idOrTitle);
+  }
+
+  public async getPdfData(
+    docIdOrTitle: string
+  ): Promise<{
+    data: Uint8Array | ArrayBuffer;
+    name: string;
+    id: string;
+    nativeUri?: string;
+  }> {
+    // 1. Check exact id match in cache
     if (this.pdfCache.has(docIdOrTitle)) {
       const item = this.pdfCache.get(docIdOrTitle)!;
-      return { data: item.data, name: item.name, id: item.id };
+      return {
+        data: item.data,
+        name: item.name,
+        id: item.id,
+        nativeUri: item.nativeUri,
+      };
     }
 
     // 2. Check title match in cache
     for (const [_, item] of this.pdfCache.entries()) {
       if (item.name.toLowerCase() === docIdOrTitle.toLowerCase()) {
-        return { data: item.data, name: item.name, id: item.id };
+        return {
+          data: item.data,
+          name: item.name,
+          id: item.id,
+          nativeUri: item.nativeUri,
+        };
       }
     }
 
-    // 3. Match known generators or generate authentic dynamic PDF
+    // 3. Check if we have a native URI for this file on device
+    const nativeUri = this.nativeUriMap.get(docIdOrTitle);
+    if (nativeUri) {
+      const bytes = await readNativePdfBytes(nativeUri);
+      if (bytes) {
+        const stored: StoredPdf = {
+          id: docIdOrTitle,
+          name: docIdOrTitle.split('/').pop() || docIdOrTitle,
+          data: bytes,
+          uploadedAt: 'Device',
+          nativeUri,
+        };
+        this.pdfCache.set(docIdOrTitle, stored);
+        return {
+          data: stored.data,
+          name: stored.name,
+          id: stored.id,
+          nativeUri,
+        };
+      }
+    }
+
+    // 4. Match known generators or generate authentic dynamic PDF
     const lower = docIdOrTitle.toLowerCase();
     let generatedBytes: Uint8Array;
     let finalTitle = docIdOrTitle;
 
-    if (lower.includes('tax') || lower.includes('1040') || lower.includes('schedule c')) {
+    if (
+      lower.includes('tax') ||
+      lower.includes('1040') ||
+      lower.includes('schedule c')
+    ) {
       generatedBytes = await generateTaxFilingPdf();
       finalTitle = 'Q4_Tax_Filing_Signed.pdf';
     } else if (lower.includes('contract') || lower.includes('vendor')) {
@@ -67,7 +198,11 @@ class PdfStoreService {
       finalTitle = 'Executive_Audit_Report_2026.pdf';
     } else {
       // Dynamic authentic multi-page PDF generation for device storage items
-      generatedBytes = await generateDynamicDevicePdf(docIdOrTitle, 'Documents', 6);
+      generatedBytes = await generateDynamicDevicePdf(
+        docIdOrTitle,
+        'Documents',
+        6
+      );
       if (!finalTitle.toLowerCase().endsWith('.pdf')) {
         finalTitle = `${finalTitle}.pdf`;
       }
@@ -78,9 +213,15 @@ class PdfStoreService {
       name: finalTitle,
       data: generatedBytes,
       uploadedAt: 'Today',
+      nativeUri,
     };
     this.pdfCache.set(docIdOrTitle, stored);
-    return { data: stored.data, name: stored.name, id: stored.id };
+    return {
+      data: stored.data,
+      name: stored.name,
+      id: stored.id,
+      nativeUri,
+    };
   }
 
   /**
@@ -89,13 +230,17 @@ class PdfStoreService {
   public addDevicePdf(
     file: { name: string; size: number },
     buffer: ArrayBuffer,
-    folder: 'Downloads' | 'Documents' | 'Scans' | 'Books' = 'Documents'
+    folder: 'Downloads' | 'Documents' | 'Scans' | 'Books' = 'Documents',
+    nativeUri?: string
   ): DocFile {
     const id = `device-pdf-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-    
+
     // Format size
     const sizeInMb = (file.size / (1024 * 1024)).toFixed(1);
-    const sizeStr = file.size > 1024 * 1024 ? `${sizeInMb} MB` : `${Math.round(file.size / 1024)} KB`;
+    const sizeStr =
+      file.size > 1024 * 1024
+        ? `${sizeInMb} MB`
+        : `${Math.round(file.size / 1024)} KB`;
 
     const stored: StoredPdf = {
       id,
@@ -103,10 +248,15 @@ class PdfStoreService {
       data: buffer,
       pageCount: 1,
       uploadedAt: 'Just now',
+      nativeUri,
     };
 
     this.pdfCache.set(id, stored);
     this.pdfCache.set(file.name, stored);
+    if (nativeUri) {
+      this.nativeUriMap.set(id, nativeUri);
+      this.nativeUriMap.set(file.name, nativeUri);
+    }
 
     const docFile: DocFile = {
       id,
@@ -114,7 +264,7 @@ class PdfStoreService {
       type: 'pdf',
       size: sizeStr,
       modified: 'Just now',
-      source: 'Local Storage',
+      source: 'Device Storage',
       status: 'Signed',
       pageCount: 1,
       folder,
@@ -138,6 +288,7 @@ class PdfStoreService {
   public deleteDeviceFile(id: string) {
     this.userFiles = this.userFiles.filter((f) => f.id !== id);
     this.pdfCache.delete(id);
+    this.nativeUriMap.delete(id);
     this.notify();
   }
 
@@ -146,7 +297,7 @@ class PdfStoreService {
   }
 
   public getAllFiles(): DocFile[] {
-    return [...this.userFiles, ...INITIAL_FILES];
+    return [...this.userFiles];
   }
 
   /**

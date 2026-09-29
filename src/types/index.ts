@@ -6,8 +6,8 @@ export interface DocFile {
   type: FileType;
   size: string;
   modified: string;
-  source: 'Cached' | 'ReadOnly' | 'Dropbox' | 'Google Drive' | 'Local Storage';
-  status: 'Signed' | 'Protected' | 'Synced' | 'v3.4' | 'Certified';
+  source: 'Cached' | 'ReadOnly' | 'Dropbox' | 'Google Drive' | 'Local Storage' | 'Device Storage';
+  status: 'Signed' | 'Protected' | 'Synced' | 'v3.4' | 'Certified' | 'Device';
   statusColor?: string;
   pageCount?: number;
   selected?: boolean;

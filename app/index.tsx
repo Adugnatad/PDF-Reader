@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'expo-router';
 import { FilesHomeScreen } from '../src/components/FilesHomeScreen';
-import { INITIAL_FILES } from '../src/data/mockData';
 import { DocFile } from '../src/types';
 import { useToast } from '../src/context/ToastContext';
 import { pdfStore } from '../src/services/pdfStore';
@@ -9,14 +8,16 @@ import { pdfStore } from '../src/services/pdfStore';
 export default function IndexScreen() {
   const router = useRouter();
   const { showToast } = useToast();
-  const [allFiles, setAllFiles] = useState<DocFile[]>(() => [
-    ...pdfStore.getUserFiles(),
-    ...INITIAL_FILES,
-  ]);
+  const [allFiles, setAllFiles] = useState<DocFile[]>(() => pdfStore.getUserFiles());
 
   useEffect(() => {
+    // Automatically scan native device storage for PDF documents on launch
+    pdfStore.scanDeviceAutomatically().catch((err) => {
+      console.warn('Auto device scan error:', err);
+    });
+
     return pdfStore.subscribe(() => {
-      setAllFiles([...pdfStore.getUserFiles(), ...INITIAL_FILES]);
+      setAllFiles(pdfStore.getUserFiles());
     });
   }, []);
 

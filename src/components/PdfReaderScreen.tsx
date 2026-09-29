@@ -154,9 +154,9 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
         setActiveTitle(item.name);
 
         if (Platform.OS !== "web") {
-          const localUri = await getPdfLocalUri(item.data, item.name);
+          const directUri = item.nativeUri || (await getPdfLocalUri(item.data, item.name));
           if (isCancelled) return;
-          setNativePdfUri(localUri);
+          setNativePdfUri(directUri);
         }
 
         // On Web, initialize pdfjsLib for search, reflow, and continuous view

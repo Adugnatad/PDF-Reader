@@ -2,6 +2,49 @@ export interface PickedFileResult {
   name: string;
   size: number;
   buffer: ArrayBuffer;
+  uri?: string;
+}
+
+export interface DiscoveredPdfItem {
+  id: string;
+  name: string;
+  size: number;
+  uri: string;
+  lastModified?: number;
+  folder: 'Downloads' | 'Documents' | 'Scans' | 'Books';
+}
+
+/**
+ * Reads binary ArrayBuffer from a web URI / blob
+ */
+export async function readNativePdfBytes(fileUriOrPath: string): Promise<ArrayBuffer | null> {
+  try {
+    const res = await fetch(fileUriOrPath);
+    if (res.ok) {
+      return await res.arrayBuffer();
+    }
+  } catch (e) {
+    console.warn('readNativePdfBytes web note:', e);
+  }
+  return null;
+}
+
+/**
+ * Web Implementation of Automatic Device PDF Scanner:
+ * Restores any previously registered device files from localStorage.
+ */
+export async function autoScanDevicePdfs(): Promise<DiscoveredPdfItem[]> {
+  if (typeof window !== 'undefined' && window.localStorage) {
+    try {
+      const stored = localStorage.getItem('docuflow_cached_device_pdfs');
+      if (stored) {
+        return JSON.parse(stored);
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return [];
 }
 
 /**

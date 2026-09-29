@@ -36,6 +36,15 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
     setDeviceFiles(files);
   }, [files]);
 
+  // Automatically scan device on mount
+  React.useEffect(() => {
+    pdfStore.scanDeviceAutomatically().then((found) => {
+      if (found && found.length > 0) {
+        setDeviceFiles(found);
+      }
+    }).catch(() => {});
+  }, []);
+
   // Load PDF file from device (iOS / Android / Web)
   const handleOpenDeviceFile = async () => {
     try {
@@ -46,7 +55,8 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
       const newDoc = pdfStore.addDevicePdf(
         { name: picked.name, size: picked.size },
         picked.buffer,
-        'Documents'
+        'Documents',
+        picked.uri
       );
       setDeviceFiles(pdfStore.getAllFiles());
       onShowToast(`Opened ${picked.name}`);
@@ -56,25 +66,42 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
     }
   };
 
-  // Scan device storage / multiple file picker (iOS / Android / Web)
+  // Scan device storage / filesystem (iOS / Android / Web)
   const handleScanDeviceStorage = async () => {
     setIsScanning(true);
     onShowToast('Scanning device for PDF documents...');
 
     try {
+      const initialCount = pdfStore.getUserFiles().length;
+      const autoFound = await pdfStore.scanDeviceAutomatically();
+      const afterAutoCount = autoFound.length;
+
+      if (afterAutoCount > initialCount) {
+        setDeviceFiles(pdfStore.getAllFiles());
+        const diff = afterAutoCount - initialCount;
+        onShowToast(`Found ${diff} new PDF document${diff === 1 ? '' : 's'} on device`);
+        return;
+      }
+
+      // If no new files found automatically in standard folders, allow manual folder picking
       const scanned = await scanDeviceStorage();
       if (scanned && scanned.length > 0) {
         for (const item of scanned) {
           pdfStore.addDevicePdf(
             { name: item.name, size: item.size },
             item.buffer,
-            'Documents'
+            'Documents',
+            item.uri
           );
         }
         setDeviceFiles(pdfStore.getAllFiles());
         onShowToast(`Added ${scanned.length} document${scanned.length === 1 ? '' : 's'} from device`);
       } else {
-        onShowToast('Device scan complete: all PDFs up to date');
+        onShowToast(
+          afterAutoCount > 0
+            ? `Device scan complete (${afterAutoCount} documents ready)`
+            : 'No new PDF files found on device'
+        );
       }
     } catch (err: any) {
       console.warn('Scan note:', err);
@@ -92,6 +119,14 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
     );
     const target = deviceFiles.find((f) => f.id === fileId);
     onShowToast(target?.favorite ? 'Removed from favorites' : 'Added to favorites');
+  };
+
+  // Remove file from recent documents
+  const handleDeleteFile = (fileId: string, fileName: string, e: any) => {
+    e.stopPropagation?.();
+    pdfStore.deleteDeviceFile(fileId);
+    setDeviceFiles(pdfStore.getAllFiles());
+    onShowToast(`Removed ${fileName}`);
   };
 
   // Filtered and sorted PDFs
@@ -300,12 +335,14 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
         <View style={styles.filesList}>
           {filteredFiles.length === 0 ? (
             <View style={styles.emptyContainer}>
-              <Ionicons name="document-text-outline" size={48} color="#475569" />
-              <Text style={styles.emptyTitle}>No PDFs found</Text>
+              <View style={styles.emptyIconCircle}>
+                <Ionicons name="document-text-outline" size={42} color="#7bd0ff" />
+              </View>
+              <Text style={styles.emptyTitle}>No PDF documents</Text>
               <Text style={styles.emptySubtitle}>
                 {searchQuery
                   ? `No documents matching "${searchQuery}"`
-                  : 'No PDF documents found on device. Select any PDF from your files.'}
+                  : 'Open any PDF from your device storage to read with smooth full-screen view, zoom, and annotations.'}
               </Text>
               {searchQuery ? (
                 <TouchableOpacity
@@ -317,11 +354,11 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
               ) : (
                 <TouchableOpacity
                   onPress={handleOpenDeviceFile}
-                  style={styles.emptyActionBtn}
+                  style={styles.emptyActionPrimaryBtn}
                   activeOpacity={0.8}
                 >
-                  <Ionicons name="folder-open-outline" size={16} color="#0d0096" />
-                  <Text style={styles.emptyActionBtnText}>Browse & Open PDF</Text>
+                  <Ionicons name="folder-open-outline" size={17} color="#0d0096" />
+                  <Text style={styles.emptyActionPrimaryBtnText}>Open PDF from Device</Text>
                 </TouchableOpacity>
               )}
             </View>
@@ -370,6 +407,15 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
                       size={18}
                       color={file.favorite ? '#f59e0b' : '#64748b'}
                     />
+                  </TouchableOpacity>
+
+                  {/* Remove / Delete File Button */}
+                  <TouchableOpacity
+                    onPress={(e) => handleDeleteFile(file.id, file.name, e)}
+                    style={styles.deleteFileBtn}
+                    accessibilityLabel="Remove File"
+                  >
+                    <Ionicons name="trash-outline" size={16} color="#64748b" />
                   </TouchableOpacity>
 
                   {/* Chevron Right */}
@@ -619,35 +665,73 @@ const styles = StyleSheet.create({
     color: '#64748b',
   },
   starBtn: {
-    padding: 4,
+    padding: 6,
+  },
+  deleteFileBtn: {
+    padding: 6,
+    marginRight: 2,
   },
   emptyContainer: {
     alignItems: 'center',
-    paddingVertical: 48,
-    gap: 8,
+    paddingVertical: 56,
+    paddingHorizontal: 24,
+    gap: 10,
+  },
+  emptyIconCircle: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: 'rgba(123, 208, 255, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(123, 208, 255, 0.25)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 4,
   },
   emptyTitle: {
     color: '#dae2fd',
-    fontSize: 15,
+    fontSize: 17,
     fontWeight: '700',
   },
   emptySubtitle: {
-    color: '#64748b',
-    fontSize: 12,
+    color: '#908fa0',
+    fontSize: 13,
     textAlign: 'center',
+    maxWidth: 320,
+    lineHeight: 18,
   },
   emptyActionBtn: {
     marginTop: 8,
     backgroundColor: '#17223b',
-    paddingHorizontal: 14,
-    paddingVertical: 7,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: '#263554',
   },
   emptyActionBtnText: {
     color: '#7bd0ff',
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '700',
+  },
+  emptyActionPrimaryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 12,
+    backgroundColor: '#7bd0ff',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  emptyActionPrimaryBtnText: {
+    color: '#0d0096',
+    fontSize: 14,
+    fontWeight: '800',
   },
 });
