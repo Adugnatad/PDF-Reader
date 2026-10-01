@@ -697,6 +697,9 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
           styles.mainScrollContent,
           !reflow && styles.mainScrollContentPdf,
         ]}
+        scrollEnabled={
+          reflow || (Platform.OS === "web" && viewMode === "continuous")
+        }
       >
         {/* Loading State */}
         {isLoading && (
@@ -800,11 +803,14 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
           </View>
         )}
 
-        {/* 2. REAL CANVAS RENDERING (SINGLE PAGE MODE) */}
-        {!isLoading && !loadError && !reflow && viewMode === "single" && (
+        {/* 2. REAL CANVAS / NATIVE PDF RENDERING */}
+        {!isLoading &&
+          !loadError &&
+          !reflow &&
+          (Platform.OS !== "web" || viewMode === "single") && (
           <View style={styles.pageOuterWrapper}>
             {/* Floating Lateral Navigation Chevron Arrows (for Horizontal Reading Direction) */}
-            {readingDirection === "horizontal" && (
+            {readingDirection === "horizontal" && viewMode === "single" && (
               <>
                 <TouchableOpacity
                   onPress={handlePrevPage}
@@ -879,6 +885,8 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                     page={currentPage}
                     scale={zoom}
                     fitPolicy={0}
+                    enablePaging={viewMode === "single"}
+                    spacing={10}
                     horizontal={readingDirection === "horizontal"}
                     onLoadComplete={(loadedPages) => {
                       setNumPages(loadedPages);
@@ -1006,10 +1014,11 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
           </View>
         )}
 
-        {/* 3. CONTINUOUS SCROLL VIEW */}
+        {/* 3. CONTINUOUS SCROLL VIEW (WEB ONLY) */}
         {!isLoading &&
           !loadError &&
           !reflow &&
+          Platform.OS === "web" &&
           viewMode === "continuous" &&
           (readingDirection === "horizontal" ? (
             <ScrollView
@@ -1681,12 +1690,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
     width: "100%",
     flex: 1,
+    minHeight:
+      Platform.OS !== "web" ? Dimensions.get("window").height - 140 : undefined,
   },
   pdfPaper: {
     width: "100%",
     flex: 1,
     overflow: "hidden",
     alignItems: "center",
+    minHeight:
+      Platform.OS !== "web" ? Dimensions.get("window").height - 140 : undefined,
   },
   canvasRelativeWrapper: {
     width: "100%",
@@ -1694,6 +1707,8 @@ const styles = StyleSheet.create({
     position: "relative",
     cursor: "crosshair" as any,
     alignItems: "center",
+    minHeight:
+      Platform.OS !== "web" ? Dimensions.get("window").height - 140 : undefined,
   },
   paperFooter: {
     width: "100%",
@@ -2242,5 +2257,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     flex: 1,
+    minHeight:
+      Platform.OS !== "web" ? Dimensions.get("window").height - 140 : undefined,
   },
 });
