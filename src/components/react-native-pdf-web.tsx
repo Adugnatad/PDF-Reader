@@ -1,4 +1,10 @@
-import React, { useEffect, useRef, useState, forwardRef } from 'react';
+import React, {
+  useEffect,
+  useRef,
+  useState,
+  forwardRef,
+  useImperativeHandle,
+} from 'react';
 import { View, StyleSheet, ActivityIndicator } from 'react-native';
 import { pdfjsLib } from '../services/pdfService';
 import { fastBase64ToUint8 } from '../utils/fastBase64';
@@ -52,11 +58,12 @@ export interface PdfProps {
  * Web Implementation of react-native-pdf
  * Provides 100% API compatibility with `import Pdf from 'react-native-pdf'`
  * rendering via HTML5 canvas, edge-to-edge full width with sharp devicePixelRatio scaling.
+ * Features flicker-free double buffering and imperative setPage navigation.
  */
 const Pdf = forwardRef<any, PdfProps>((props, forwardedRef) => {
   const {
     source,
-    page = 1,
+    page: propPage,
     scale = 1,
     fitPolicy = 0,
     style,
@@ -66,12 +73,27 @@ const Pdf = forwardRef<any, PdfProps>((props, forwardedRef) => {
     renderActivityIndicator,
   } = props;
 
+  const [activePage, setActivePage] = useState<number>(propPage || 1);
   const localCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const canvasRef = (forwardedRef as any) || props.canvasRef || localCanvasRef;
   const currentRenderTask = useRef<any>(null);
   const [loading, setLoading] = useState(true);
   const [doc, setDoc] = useState<any>(null);
   const [containerWidth, setContainerWidth] = useState<number>(0);
+
+  // Sync prop changes if propPage is passed explicitly
+  useEffect(() => {
+    if (propPage !== undefined && propPage !== activePage) {
+      setActivePage(propPage);
+    }
+  }, [propPage]);
+
+  // Expose imperative setPage method matching native react-native-pdf
+  useImperativeHandle(forwardedRef, () => ({
+    setPage: (pageNumber: number) => {
+      setActivePage(pageNumber);
+    },
+    getCanvas: () => localCanvasRef.current,
+  }));
 
   const uri = typeof source === 'object' && source?.uri ? source.uri : '';
 
@@ -102,7 +124,7 @@ const Pdf = forwardRef<any, PdfProps>((props, forwardedRef) => {
           onLoadComplete(loadedDoc.numPages, uri, { width: 595, height: 842 });
         }
         if (onPageChanged) {
-          onPageChanged(page, loadedDoc.numPages);
+          onPageChanged(activePage, loadedDoc.numPages);
         }
       } catch (err: any) {
         if (isCancelled) return;
@@ -118,9 +140,10 @@ const Pdf = forwardRef<any, PdfProps>((props, forwardedRef) => {
     };
   }, [uri]);
 
+  // Render page with flicker-free double buffering
   useEffect(() => {
     let isCancelled = false;
-    if (!doc || !canvasRef.current) return;
+    if (!doc || !localCanvasRef.current) return;
 
     async function renderPage() {
       try {
@@ -129,7 +152,7 @@ const Pdf = forwardRef<any, PdfProps>((props, forwardedRef) => {
           currentRenderTask.current = null;
         }
 
-        const targetPage = Math.max(1, Math.min(page, doc.numPages));
+        const targetPage = Math.max(1, Math.min(activePage, doc.numPages));
         const pageObj = await doc.getPage(targetPage);
         if (isCancelled) return;
 
@@ -145,28 +168,45 @@ const Pdf = forwardRef<any, PdfProps>((props, forwardedRef) => {
         }
 
         const viewport = pageObj.getViewport({ scale: effectiveScale });
-        const canvas = canvasRef.current;
+        const canvas = localCanvasRef.current;
         if (!canvas) return;
 
         const pixelRatio =
           (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
-        canvas.width = Math.floor(viewport.width * pixelRatio);
-        canvas.height = Math.floor(viewport.height * pixelRatio);
-        canvas.style.width = '100%';
-        canvas.style.height = 'auto';
+        const targetWidth = Math.floor(viewport.width * pixelRatio);
+        const targetHeight = Math.floor(viewport.height * pixelRatio);
 
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
+        // Flicker-free double buffering: Render onto an offscreen canvas
+        const offscreen = document.createElement('canvas');
+        offscreen.width = targetWidth;
+        offscreen.height = targetHeight;
+        const offCtx = offscreen.getContext('2d');
+        if (!offCtx) return;
 
-        ctx.save();
-        ctx.scale(pixelRatio, pixelRatio);
+        offCtx.scale(pixelRatio, pixelRatio);
 
         const renderTask = pageObj.render({
-          canvasContext: ctx,
+          canvasContext: offCtx,
           viewport,
         });
         currentRenderTask.current = renderTask;
         await renderTask.promise;
+        if (isCancelled) return;
+
+        // Atomically copy the rendered offscreen buffer to the visible canvas in a single frame
+        canvas.width = targetWidth;
+        canvas.height = targetHeight;
+        canvas.style.width = '100%';
+        canvas.style.height = 'auto';
+
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(offscreen, 0, 0);
+        }
+
+        if (onPageChanged) {
+          onPageChanged(targetPage, doc.numPages);
+        }
       } catch (err: any) {
         if (err?.name === 'RenderingCancelledException') return;
         if (onError) onError(err);
@@ -180,7 +220,7 @@ const Pdf = forwardRef<any, PdfProps>((props, forwardedRef) => {
         currentRenderTask.current.cancel();
       }
     };
-  }, [doc, page, scale, containerWidth, fitPolicy]);
+  }, [doc, activePage, scale, containerWidth, fitPolicy]);
 
   return (
     <View
@@ -202,7 +242,7 @@ const Pdf = forwardRef<any, PdfProps>((props, forwardedRef) => {
         </View>
       )}
       <canvas
-        ref={canvasRef}
+        ref={localCanvasRef}
         style={{
           display: loading ? 'none' : 'block',
           width: '100%',

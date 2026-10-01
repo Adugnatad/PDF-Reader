@@ -123,10 +123,10 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
   const pdfSource = useMemo(() => {
     if (!pdfBytes) return { uri: "" };
     if (Platform.OS !== "web" && nativePdfUri) {
-      return { uri: nativePdfUri, cache: false };
+      return { uri: nativePdfUri, cache: true };
     }
     const b64 = fastUint8ToBase64(pdfBytes);
-    return { uri: `data:application/pdf;base64,${b64}`, cache: false };
+    return { uri: `data:application/pdf;base64,${b64}`, cache: true };
   }, [pdfBytes, nativePdfUri]);
 
   // Canvas & DOM Refs (portable across React Native and Web)
@@ -396,24 +396,34 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
   // 6. Navigation Handlers
   const handlePrevPage = () => {
     if (currentPage > 1) {
-      setCurrentPage((prev) => prev - 1);
-      onShowToast(`Page ${currentPage - 1} of ${numPages}`);
+      const next = currentPage - 1;
+      setCurrentPage(next);
+      canvasRef.current?.setPage?.(next);
+      onShowToast(`Page ${next} of ${numPages}`);
     }
   };
 
   const handleNextPage = () => {
     if (currentPage < numPages) {
-      setCurrentPage((prev) => prev + 1);
-      onShowToast(`Page ${currentPage + 1} of ${numPages}`);
+      const next = currentPage + 1;
+      setCurrentPage(next);
+      canvasRef.current?.setPage?.(next);
+      onShowToast(`Page ${next} of ${numPages}`);
     }
   };
 
   const handleSelectPage = (pageNum: number) => {
     const target = Math.max(1, Math.min(numPages, pageNum));
     setCurrentPage(target);
+    canvasRef.current?.setPage?.(target);
     setShowPagePicker(false);
     onShowToast(`Jumped to Page ${target}`);
   };
+
+  // Sync current page smoothly when viewMode switches between single and continuous
+  useEffect(() => {
+    canvasRef.current?.setPage?.(currentPage);
+  }, [viewMode]);
 
   // 7. Zoom Handlers
   const handleZoomIn = () => {
@@ -882,10 +892,10 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                   <Pdf
                     ref={canvasRef as any}
                     source={pdfSource}
-                    page={currentPage}
                     scale={zoom}
                     fitPolicy={0}
                     enablePaging={viewMode === "single"}
+                    enableAntialiasing={true}
                     spacing={10}
                     horizontal={readingDirection === "horizontal"}
                     onLoadComplete={(loadedPages) => {
@@ -893,8 +903,8 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                       setIsLoading(false);
                     }}
                     onPageChanged={(page, total) => {
-                      setCurrentPage(page);
-                      setNumPages(total);
+                      setCurrentPage((prev) => (prev !== page ? page : prev));
+                      setNumPages((prev) => (prev !== total ? total : prev));
                     }}
                     onError={(err) => {
                       console.warn("react-native-pdf view note:", err);
@@ -1285,6 +1295,9 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
           <TouchableOpacity
             style={styles.viewModeBottomInner}
             onPress={() => setShowViewModeModal(true)}
+            activeOpacity={0.7}
+            accessibilityLabel="View Mode"
+            accessibilityRole="button"
           >
             <MaterialIcons name="book" size={23} color="#fff" />
             <Text style={styles.viewModeBtnTitle}>View Mode</Text>
