@@ -1270,26 +1270,39 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
             </TouchableOpacity>
           </View> */}
 
-          {/* PROMINENT VIEW MODE BUTTON AT BOTTOM */}
-          {/* <TouchableOpacity
+          {/* BOTTOM BAR ITEMS: View Mode, Edit, Settings */}
+          <TouchableOpacity
+            style={styles.viewModeBottomInner}
             onPress={() => setShowViewModeModal(true)}
-            style={styles.viewModeBottomBtn}
-            activeOpacity={0.8}
-            accessibilityLabel="Open View Mode Options"
-          > */}
-          <TouchableOpacity style={styles.viewModeBottomInner}>
+            activeOpacity={0.7}
+            accessibilityLabel="View Mode"
+            accessibilityRole="button"
+          >
             <MaterialIcons name="book" size={23} color="#fff" />
             <Text style={styles.viewModeBtnTitle}>View Mode</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.viewModeBottomInner}>
+          <TouchableOpacity
+            style={styles.viewModeBottomInner}
+            onPress={() => {
+              onShowToast("Edit & annotation tools enabled");
+            }}
+            activeOpacity={0.7}
+            accessibilityLabel="Edit"
+            accessibilityRole="button"
+          >
             <MaterialIcons name="edit" size={23} color="#fff" />
             <Text style={styles.viewModeBtnTitle}>Edit</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.viewModeBottomInner}>
+          <TouchableOpacity
+            style={styles.viewModeBottomInner}
+            onPress={() => setShowViewModeModal(true)}
+            activeOpacity={0.7}
+            accessibilityLabel="Settings"
+            accessibilityRole="button"
+          >
             <MaterialIcons name="settings" size={23} color="#fff" />
             <Text style={styles.viewModeBtnTitle}>Settings</Text>
           </TouchableOpacity>
-          {/* </TouchableOpacity> */}
         </View>
       </View>
 
@@ -2008,11 +2021,11 @@ const styles = StyleSheet.create({
   bottomBarInner: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
+    justifyContent: "space-around",
     maxWidth: 900,
     alignSelf: "center",
     width: "100%",
-    gap: 12,
+    paddingHorizontal: 16,
   },
   dockPageNavGroup: {
     flexDirection: "row",
