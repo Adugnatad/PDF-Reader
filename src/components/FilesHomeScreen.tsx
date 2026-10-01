@@ -107,34 +107,16 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
     try {
       const initialCount = pdfStore.getUserFiles().length;
       const autoFound = await pdfStore.scanDeviceAutomatically();
-      const afterAutoCount = autoFound.length;
+      const currentFiles = pdfStore.getAllFiles();
+      setDeviceFiles(currentFiles);
 
-      if (afterAutoCount > initialCount) {
-        setDeviceFiles(pdfStore.getAllFiles());
-        const diff = afterAutoCount - initialCount;
+      if (autoFound.length > initialCount) {
+        const diff = autoFound.length - initialCount;
         onShowToast(`Found ${diff} new PDF document${diff === 1 ? '' : 's'} on device`);
-        return;
-      }
-
-      // If no new files found automatically in standard folders, allow manual folder picking
-      const scanned = await scanDeviceStorage();
-      if (scanned && scanned.length > 0) {
-        for (const item of scanned) {
-          pdfStore.addDevicePdf(
-            { name: item.name, size: item.size },
-            item.buffer,
-            'Documents',
-            item.uri
-          );
-        }
-        setDeviceFiles(pdfStore.getAllFiles());
-        onShowToast(`Added ${scanned.length} document${scanned.length === 1 ? '' : 's'} from device`);
+      } else if (currentFiles.length > 0) {
+        onShowToast(`Scan complete: ${currentFiles.length} document${currentFiles.length === 1 ? '' : 's'} ready`);
       } else {
-        onShowToast(
-          afterAutoCount > 0
-            ? `Device scan complete (${afterAutoCount} documents ready)`
-            : 'No new PDF files found on device'
-        );
+        onShowToast('No PDF documents found on device');
       }
     } catch (err: any) {
       console.warn('Scan note:', err);

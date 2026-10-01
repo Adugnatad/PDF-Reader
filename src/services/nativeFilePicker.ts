@@ -3,6 +3,7 @@ export interface PickedFileResult {
   size: number;
   buffer: ArrayBuffer;
   uri?: string;
+  pageCount?: number;
 }
 
 export interface DiscoveredPdfItem {
