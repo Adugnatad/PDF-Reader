@@ -13,6 +13,7 @@ import { useFocusEffect } from 'expo-router';
 import { DocFile } from '../types';
 import { pdfStore } from '../services/pdfStore';
 import { pickPdfFromDevice, scanDeviceStorage } from '../services/nativeFilePicker';
+import { isUuidOrHash, resolvePdfDisplayName } from '../utils/pdfNameResolver';
 
 interface FilesHomeScreenProps {
   files: DocFile[];
@@ -392,10 +393,14 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
             </View>
           ) : (
             filteredFiles.map((file) => {
+              const displayName = isUuidOrHash(file.name)
+                ? resolvePdfDisplayName(file.name, pdfStore.getNativeUri(file.id), undefined).name
+                : file.name;
+
               return (
                 <TouchableOpacity
                   key={file.id}
-                  onPress={() => onOpenFile(file)}
+                  onPress={() => onOpenFile({ ...file, name: displayName })}
                   style={styles.fileCard}
                   activeOpacity={0.7}
                 >
@@ -413,7 +418,7 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
                   {/* Document Information */}
                   <View style={styles.fileDetails}>
                     <Text style={styles.fileName} numberOfLines={1}>
-                      {file.name}
+                      {displayName}
                     </Text>
                     <View style={styles.metaRow}>
                       <Text style={styles.metaText}>{file.pageCount || 1} pages</Text>

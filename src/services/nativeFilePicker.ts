@@ -12,6 +12,7 @@ export interface DiscoveredPdfItem {
   uri: string;
   lastModified?: number;
   folder: 'Downloads' | 'Documents' | 'Scans' | 'Books';
+  pageCount?: number;
 }
 
 /**

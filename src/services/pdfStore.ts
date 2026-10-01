@@ -10,6 +10,12 @@ import {
   readNativePdfBytes,
   DiscoveredPdfItem,
 } from './nativeFilePicker';
+import {
+  isUuidOrHash,
+  resolvePdfDisplayName,
+  registerKnownPdfName,
+  getKnownPdfName,
+} from '../utils/pdfNameResolver';
 
 interface StoredPdf {
   id: string;
@@ -44,20 +50,50 @@ class PdfStoreService {
   }
 
   /**
-   * Registers automatically scanned PDFs from native device filesystem
+   * Registers automatically scanned PDFs from native device filesystem,
+   * guaranteeing authentic, clean document titles and real page counts.
    */
   public registerDiscoveredDevicePdfs(items: DiscoveredPdfItem[]): DocFile[] {
     let changed = false;
     const nextFiles = [...this.userFiles];
 
     for (const item of items) {
-      // Check if already in userFiles (by id or uri or name)
-      const existing = nextFiles.find(
+      let displayName = item.name;
+      let pageCount = item.pageCount || 1;
+
+      // Check known clean name
+      const known = getKnownPdfName(item.uri);
+      if (known && !isUuidOrHash(known)) {
+        displayName = known;
+      } else if (isUuidOrHash(displayName)) {
+        const resolved = resolvePdfDisplayName(displayName, item.uri, undefined, item.size);
+        displayName = resolved.name;
+        if (resolved.pageCount) pageCount = resolved.pageCount;
+      }
+
+      // Check if already in userFiles (by id, uri, or name)
+      const existingIndex = nextFiles.findIndex(
         (f) =>
           f.id === item.id ||
-          (f.name === item.name && this.nativeUriMap.get(f.id) === item.uri)
+          this.nativeUriMap.get(f.id) === item.uri ||
+          f.name === displayName ||
+          (isUuidOrHash(f.name) && this.nativeUriMap.get(f.id) === item.uri)
       );
-      if (existing) continue;
+
+      if (existingIndex >= 0) {
+        // If existing file currently shows a UUID, update it to the authentic name!
+        if (isUuidOrHash(nextFiles[existingIndex].name) && !isUuidOrHash(displayName)) {
+          nextFiles[existingIndex] = {
+            ...nextFiles[existingIndex],
+            name: displayName,
+            pageCount: pageCount || nextFiles[existingIndex].pageCount,
+          };
+          this.nativeUriMap.set(displayName, item.uri);
+          registerKnownPdfName(item.uri, displayName);
+          changed = true;
+        }
+        continue;
+      }
 
       const sizeInMb = (item.size / (1024 * 1024)).toFixed(1);
       const sizeStr =
@@ -76,20 +112,21 @@ class PdfStoreService {
 
       const docFile: DocFile = {
         id: item.id,
-        name: item.name,
+        name: displayName,
         type: 'pdf',
         size: sizeStr,
         modified: modStr,
         source: 'Device Storage',
         status: 'Device',
-        pageCount: 1,
+        pageCount,
         folder: item.folder || 'Documents',
         favorite: false,
         selected: false,
       };
 
+      registerKnownPdfName(item.uri, displayName);
       this.nativeUriMap.set(item.id, item.uri);
-      this.nativeUriMap.set(item.name, item.uri);
+      this.nativeUriMap.set(displayName, item.uri);
 
       nextFiles.push(docFile);
       changed = true;
@@ -169,14 +206,17 @@ class PdfStoreService {
     if (nativeUri) {
       const bytes = await readNativePdfBytes(nativeUri);
       if (bytes) {
+        const resolved = resolvePdfDisplayName(docIdOrTitle, nativeUri, bytes);
+        const resolvedName = resolved.name || docIdOrTitle;
         const stored: StoredPdf = {
           id: docIdOrTitle,
-          name: docIdOrTitle.split('/').pop() || docIdOrTitle,
+          name: resolvedName,
           data: bytes,
           uploadedAt: 'Device',
           nativeUri,
         };
         this.pdfCache.set(docIdOrTitle, stored);
+        this.pdfCache.set(resolvedName, stored);
         return {
           data: stored.data,
           name: stored.name,
@@ -243,38 +283,51 @@ class PdfStoreService {
   ): DocFile {
     const id = `device-pdf-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
 
+    // Resolve clean name and page count from buffer
+    let resolvedName = file.name;
+    let pageCount = 1;
+    if (buffer) {
+      const resolved = resolvePdfDisplayName(file.name, nativeUri, buffer, file.size);
+      resolvedName = resolved.name;
+      if (resolved.pageCount) pageCount = resolved.pageCount;
+    }
+
+    if (nativeUri) {
+      registerKnownPdfName(nativeUri, resolvedName);
+    }
+
     // Format size
     const sizeInMb = (file.size / (1024 * 1024)).toFixed(1);
     const sizeStr =
       file.size > 1024 * 1024
         ? `${sizeInMb} MB`
-        : `${Math.round(file.size / 1024)} KB`;
+        : `${Math.max(1, Math.round(file.size / 1024))} KB`;
 
     const stored: StoredPdf = {
       id,
-      name: file.name,
+      name: resolvedName,
       data: buffer,
-      pageCount: 1,
+      pageCount,
       uploadedAt: 'Just now',
       nativeUri,
     };
 
     this.pdfCache.set(id, stored);
-    this.pdfCache.set(file.name, stored);
+    this.pdfCache.set(resolvedName, stored);
     if (nativeUri) {
       this.nativeUriMap.set(id, nativeUri);
-      this.nativeUriMap.set(file.name, nativeUri);
+      this.nativeUriMap.set(resolvedName, nativeUri);
     }
 
     const docFile: DocFile = {
       id,
-      name: file.name,
+      name: resolvedName,
       type: 'pdf',
       size: sizeStr,
       modified: 'Just now',
       source: 'Device Storage',
       status: 'Signed',
-      pageCount: 1,
+      pageCount,
       folder,
       favorite: false,
       selected: true,
