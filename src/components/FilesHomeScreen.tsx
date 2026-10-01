@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   Platform,
+  Modal,
 } from 'react-native';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
@@ -32,6 +33,9 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
   const [sortAsc, setSortAsc] = useState(false);
   const [showSortMenu, setShowSortMenu] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
+  const [renameModalVisible, setRenameModalVisible] = useState(false);
+  const [editingFileId, setEditingFileId] = useState<string | null>(null);
+  const [editingFileName, setEditingFileName] = useState('');
 
   // Sync with prop changes
   React.useEffect(() => {
@@ -156,6 +160,27 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
     pdfStore.deleteDeviceFile(fileId);
     setDeviceFiles(pdfStore.getAllFiles());
     onShowToast(`Removed ${fileName}`);
+  };
+
+  // Start renaming a file
+  const handleStartRename = (fileId: string, currentName: string, e: any) => {
+    e.stopPropagation?.();
+    setEditingFileId(fileId);
+    setEditingFileName(currentName.replace(/\.pdf$/i, ''));
+    setRenameModalVisible(true);
+  };
+
+  // Save the renamed file
+  const handleConfirmRename = () => {
+    if (!editingFileId || !editingFileName.trim()) return;
+    const clean = editingFileName.trim();
+    const ok = pdfStore.renameDocument(editingFileId, clean);
+    if (ok) {
+      setDeviceFiles(pdfStore.getAllFiles());
+      onShowToast(`Renamed to ${clean}.pdf`);
+    }
+    setRenameModalVisible(false);
+    setEditingFileId(null);
   };
 
   // Filtered and sorted PDFs
@@ -442,6 +467,15 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
                     />
                   </TouchableOpacity>
 
+                  {/* Rename File Button */}
+                  <TouchableOpacity
+                    onPress={(e) => handleStartRename(file.id, displayName, e)}
+                    style={styles.renameBtn}
+                    accessibilityLabel="Rename Document"
+                  >
+                    <MaterialIcons name="edit" size={17} color="#64748b" />
+                  </TouchableOpacity>
+
                   {/* Remove / Delete File Button */}
                   <TouchableOpacity
                     onPress={(e) => handleDeleteFile(file.id, file.name, e)}
@@ -459,6 +493,52 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
           )}
         </View>
       </View>
+
+      {/* Rename Document Modal */}
+      <Modal
+        visible={renameModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setRenameModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.renameCard}>
+            <View style={styles.renameHeader}>
+              <MaterialIcons name="edit-note" size={24} color="#7bd0ff" />
+              <Text style={styles.renameTitle}>Rename Document</Text>
+            </View>
+            <Text style={styles.renameSubtitle}>
+              Enter a new file title for this document.
+            </Text>
+            <TextInput
+              value={editingFileName}
+              onChangeText={setEditingFileName}
+              placeholder="Document Title"
+              placeholderTextColor="#64748b"
+              style={styles.renameInput}
+              autoFocus
+              selectTextOnFocus
+              onSubmitEditing={handleConfirmRename}
+            />
+            <View style={styles.renameActions}>
+              <TouchableOpacity
+                onPress={() => setRenameModalVisible(false)}
+                style={styles.renameCancelBtn}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.renameCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={handleConfirmRename}
+                style={styles.renameSaveBtn}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.renameSaveText}>Save</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 };
@@ -766,5 +846,84 @@ const styles = StyleSheet.create({
     color: '#0d0096',
     fontSize: 14,
     fontWeight: '800',
+  },
+  renameBtn: {
+    padding: 6,
+    borderRadius: 6,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  renameCard: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: '#131b2e',
+    borderRadius: 16,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: '#263554',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  renameHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 6,
+  },
+  renameTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#dae2fd',
+  },
+  renameSubtitle: {
+    fontSize: 13,
+    color: '#908fa0',
+    marginBottom: 16,
+  },
+  renameInput: {
+    backgroundColor: '#0b1326',
+    borderWidth: 1,
+    borderColor: '#263554',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    color: '#dae2fd',
+    fontSize: 15,
+    marginBottom: 20,
+  },
+  renameActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+  },
+  renameCancelBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: '#1b253b',
+  },
+  renameCancelText: {
+    color: '#c7c4d7',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  renameSaveBtn: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: '#7bd0ff',
+  },
+  renameSaveText: {
+    color: '#0d0096',
+    fontSize: 14,
+    fontWeight: '700',
   },
 });

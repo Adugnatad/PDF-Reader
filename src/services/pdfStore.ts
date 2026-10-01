@@ -12,10 +12,12 @@ import {
 } from './nativeFilePicker';
 import {
   isUuidOrHash,
-  resolvePdfDisplayName,
+  cleanDocumentName,
   registerKnownPdfName,
   getKnownPdfName,
+  extractPdfInfoFromBytes,
 } from '../utils/pdfNameResolver';
+import { saveRegistryToDisk, loadRegistryFromDisk } from './storageHelper';
 
 interface StoredPdf {
   id: string;
@@ -32,12 +34,16 @@ class PdfStoreService {
   private nativeUriMap: Map<string, string> = new Map();
   private listeners: Set<() => void> = new Set();
   private scanPromise: Promise<DocFile[]> | null = null;
+  private isLoaded: boolean = false;
 
   constructor() {
-    // Automatically scan native device for PDF files on startup
-    Promise.resolve().then(() => {
-      this.scanDeviceAutomatically().catch(() => {});
-    });
+    this.initStore();
+  }
+
+  private async initStore() {
+    await this.loadFromStorage();
+    this.isLoaded = true;
+    this.scanDeviceAutomatically().catch(() => {});
   }
 
   public subscribe(listener: () => void): () => void {
@@ -49,39 +55,73 @@ class PdfStoreService {
     this.listeners.forEach((l) => l());
   }
 
+  private async saveToStorage() {
+    try {
+      const uriMapObj: Record<string, string> = {};
+      this.nativeUriMap.forEach((val, key) => {
+        uriMapObj[key] = val;
+      });
+
+      const payload = JSON.stringify({
+        files: this.userFiles,
+        uriMap: uriMapObj,
+      });
+
+      await saveRegistryToDisk(payload);
+    } catch (e) {
+      console.warn('Save registry error:', e);
+    }
+  }
+
+  private async loadFromStorage(): Promise<void> {
+    try {
+      const raw = await loadRegistryFromDisk();
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed.files && Array.isArray(parsed.files)) {
+          this.userFiles = parsed.files;
+        }
+        if (parsed.uriMap && typeof parsed.uriMap === 'object') {
+          for (const [k, v] of Object.entries(parsed.uriMap)) {
+            this.nativeUriMap.set(k, v as string);
+            registerKnownPdfName(v as string, k);
+          }
+        }
+        this.notify();
+      }
+    } catch (e) {
+      console.warn('Load registry error:', e);
+    }
+  }
+
   /**
    * Registers automatically scanned PDFs from native device filesystem,
-   * guaranteeing authentic, clean document titles and real page counts.
+   * preserving the authentic filename and page count.
    */
   public registerDiscoveredDevicePdfs(items: DiscoveredPdfItem[]): DocFile[] {
     let changed = false;
     const nextFiles = [...this.userFiles];
 
     for (const item of items) {
-      let displayName = item.name;
+      let displayName = cleanDocumentName(item.name);
       let pageCount = item.pageCount || 1;
 
       // Check known clean name
       const known = getKnownPdfName(item.uri);
-      if (known && !isUuidOrHash(known)) {
+      if (known) {
         displayName = known;
-      } else if (isUuidOrHash(displayName)) {
-        const resolved = resolvePdfDisplayName(displayName, item.uri, undefined, item.size);
-        displayName = resolved.name;
-        if (resolved.pageCount) pageCount = resolved.pageCount;
       }
 
-      // Check if already in userFiles (by id, uri, or name)
+      // Check if already in userFiles
       const existingIndex = nextFiles.findIndex(
         (f) =>
           f.id === item.id ||
           this.nativeUriMap.get(f.id) === item.uri ||
-          f.name === displayName ||
-          (isUuidOrHash(f.name) && this.nativeUriMap.get(f.id) === item.uri)
+          f.name === displayName
       );
 
       if (existingIndex >= 0) {
-        // If existing file currently shows a UUID, update it to the authentic name!
+        // If existing file has a UUID or ugly name and we have a clean name, update it!
         if (isUuidOrHash(nextFiles[existingIndex].name) && !isUuidOrHash(displayName)) {
           nextFiles[existingIndex] = {
             ...nextFiles[existingIndex],
@@ -134,15 +174,51 @@ class PdfStoreService {
 
     if (changed) {
       this.userFiles = nextFiles;
+      this.saveToStorage();
       this.notify();
     }
     return [...this.userFiles];
   }
 
   /**
-   * Automatically scans device storage (Downloads, Documents, etc.) for PDFs.
-   * If a scan is already running, returns the in-flight scan promise so all callers
-   * wait for and receive the resulting documents without race conditions.
+   * Renames any document and persists the change
+   */
+  public renameDocument(fileId: string, newName: string): boolean {
+    const clean = newName.trim();
+    if (!clean) return false;
+    const finalName = cleanDocumentName(clean);
+
+    const file = this.userFiles.find((f) => f.id === fileId);
+    if (!file) return false;
+
+    const oldName = file.name;
+    file.name = finalName;
+
+    // Update in-memory caches
+    if (this.pdfCache.has(oldName)) {
+      const cached = this.pdfCache.get(oldName)!;
+      cached.name = finalName;
+      this.pdfCache.set(finalName, cached);
+      this.pdfCache.delete(oldName);
+    }
+    if (this.pdfCache.has(fileId)) {
+      this.pdfCache.get(fileId)!.name = finalName;
+    }
+
+    const uri = this.nativeUriMap.get(fileId) || this.nativeUriMap.get(oldName);
+    if (uri) {
+      this.nativeUriMap.set(finalName, uri);
+      this.nativeUriMap.delete(oldName);
+      registerKnownPdfName(uri, finalName);
+    }
+
+    this.saveToStorage();
+    this.notify();
+    return true;
+  }
+
+  /**
+   * Automatically scans device storage for PDFs.
    */
   public async scanDeviceAutomatically(): Promise<DocFile[]> {
     if (this.scanPromise) {
@@ -206,17 +282,16 @@ class PdfStoreService {
     if (nativeUri) {
       const bytes = await readNativePdfBytes(nativeUri);
       if (bytes) {
-        const resolved = resolvePdfDisplayName(docIdOrTitle, nativeUri, bytes);
-        const resolvedName = resolved.name || docIdOrTitle;
+        const storedName = docIdOrTitle.split('/').pop() || docIdOrTitle;
         const stored: StoredPdf = {
           id: docIdOrTitle,
-          name: resolvedName,
+          name: storedName,
           data: bytes,
           uploadedAt: 'Device',
           nativeUri,
         };
         this.pdfCache.set(docIdOrTitle, stored);
-        this.pdfCache.set(resolvedName, stored);
+        this.pdfCache.set(storedName, stored);
         return {
           data: stored.data,
           name: stored.name,
@@ -273,7 +348,7 @@ class PdfStoreService {
   }
 
   /**
-   * Adds an existing PDF file from the device storage into the app library
+   * Adds an existing PDF file from device storage into the app library
    */
   public addDevicePdf(
     file: { name: string; size: number },
@@ -282,14 +357,12 @@ class PdfStoreService {
     nativeUri?: string
   ): DocFile {
     const id = `device-pdf-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    const resolvedName = cleanDocumentName(file.name);
 
-    // Resolve clean name and page count from buffer
-    let resolvedName = file.name;
     let pageCount = 1;
     if (buffer) {
-      const resolved = resolvePdfDisplayName(file.name, nativeUri, buffer, file.size);
-      resolvedName = resolved.name;
-      if (resolved.pageCount) pageCount = resolved.pageCount;
+      const info = extractPdfInfoFromBytes(buffer);
+      pageCount = info.pageCount;
     }
 
     if (nativeUri) {
@@ -333,7 +406,8 @@ class PdfStoreService {
       selected: true,
     };
 
-    this.userFiles = [docFile, ...this.userFiles];
+    this.userFiles = [docFile, ...this.userFiles.filter((f) => f.name !== resolvedName)];
+    this.saveToStorage();
     this.notify();
     return docFile;
   }
@@ -350,6 +424,7 @@ class PdfStoreService {
     this.userFiles = this.userFiles.filter((f) => f.id !== id);
     this.pdfCache.delete(id);
     this.nativeUriMap.delete(id);
+    this.saveToStorage();
     this.notify();
   }
 

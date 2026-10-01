@@ -1,7 +1,8 @@
 /**
  * Utility for resolving authentic, human-readable document titles and page counts
  * from PDF binaries, metadata dictionaries, XMP packets, and device storage paths.
- * Prevents raw UUIDs, content hashes, and temporary cache filenames from appearing in the UI.
+ * Guarantees that user filenames (e.g. "Remember.pdf") are preserved and never overwritten
+ * by internal PDF generator tags or stream tokens.
  */
 
 export interface PdfMetadataInfo {
@@ -57,6 +58,40 @@ export function isUuidOrHash(name: string): boolean {
 }
 
 /**
+ * Detects generic or junk titles like "Untitled", "Microsoft Word - Document1"
+ */
+export function isJunkTitle(title: string): boolean {
+  if (!title) return true;
+  const lower = title.toLowerCase().trim();
+  if (isUuidOrHash(lower)) return true;
+
+  const junkKeywords = [
+    'untitled',
+    'document',
+    'microsoft word',
+    'word document',
+    'presentation',
+    'page 1',
+    'sheet1',
+    'print',
+    'scan',
+    'export',
+    'default',
+    'layout',
+    'template',
+    'pdf document',
+    'device document',
+  ];
+
+  for (const junk of junkKeywords) {
+    if (lower === junk || lower.startsWith(junk + ' -') || lower.startsWith(junk + ' 1')) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Decodes a PDF hexadecimal string (ASCII, UTF-8, or UTF-16BE BOM)
  */
 function decodePdfHexString(hex: string): string {
@@ -98,7 +133,7 @@ export function cleanDocumentName(raw: string): string {
 }
 
 /**
- * Fast, lightweight extraction of Title and PageCount from PDF binary bytes (ArrayBuffer or Uint8Array)
+ * Fast, lightweight extraction of Title and PageCount from PDF binary bytes
  */
 export function extractPdfInfoFromBytes(
   buffer: ArrayBuffer | Uint8Array
@@ -114,8 +149,8 @@ export function extractPdfInfoFromBytes(
     return { title: null, pageCount: 1 };
   }
 
-  // Sample header (up to 500 KB) and trailer (last 50 KB) where Info and XMP metadata reside
-  const headerSlice = bytes.subarray(0, Math.min(bytes.length, 500000));
+  // Sample header and trailer where Info and XMP metadata reside
+  const headerSlice = bytes.subarray(0, Math.min(bytes.length, 300000));
   const trailerSlice =
     bytes.length > 50000 ? bytes.subarray(bytes.length - 50000) : new Uint8Array(0);
 
@@ -148,7 +183,7 @@ export function extractPdfInfoFromBytes(
       raw = decoded;
     }
     const cleaned = cleanDocumentName(raw);
-    if (cleaned && !isUuidOrHash(cleaned)) {
+    if (cleaned && !isUuidOrHash(cleaned) && !isJunkTitle(cleaned)) {
       title = cleaned;
     }
   }
@@ -159,7 +194,7 @@ export function extractPdfInfoFromBytes(
     if (hexMatch) {
       const decoded = decodePdfHexString(hexMatch[1]);
       const cleaned = cleanDocumentName(decoded);
-      if (cleaned && !isUuidOrHash(cleaned)) {
+      if (cleaned && !isUuidOrHash(cleaned) && !isJunkTitle(cleaned)) {
         title = cleaned;
       }
     }
@@ -172,29 +207,8 @@ export function extractPdfInfoFromBytes(
     );
     if (xmpMatch && xmpMatch[1].trim()) {
       const cleaned = cleanDocumentName(xmpMatch[1].trim());
-      if (cleaned && !isUuidOrHash(cleaned)) {
+      if (cleaned && !isUuidOrHash(cleaned) && !isJunkTitle(cleaned)) {
         title = cleaned;
-      }
-    }
-  }
-
-  // 4. Check first text heading in first content stream if still no title
-  if (!title) {
-    const tjMatches = [...headerText.matchAll(/\(([^)\r\n]{3,60})\)\s*Tj/g)];
-    for (const m of tjMatches) {
-      const candidate = m[1].trim();
-      if (
-        candidate &&
-        !/^[\d\s.,\-_/\\:;]+$/.test(candidate) &&
-        !candidate.toLowerCase().includes('pdf') &&
-        candidate.length >= 3 &&
-        candidate.length <= 50
-      ) {
-        const cleaned = cleanDocumentName(candidate);
-        if (cleaned && !isUuidOrHash(cleaned)) {
-          title = cleaned;
-          break;
-        }
       }
     }
   }
@@ -220,10 +234,9 @@ export function extractPdfInfoFromBytes(
 }
 
 /**
- * Resolves a final, human-readable file name for a PDF item:
- * 1. Checks if URI was previously mapped to a picker name
- * 2. If the current name is a UUID / hash, extracts Title from PDF bytes
- * 3. Falls back to a clean formatted name like "Document (59 KB).pdf"
+ * Resolves the final display name and page count:
+ * - If rawName is already a valid human-readable file name (e.g. "Remember.pdf"), IT IS PRESERVED.
+ * - Only if rawName is a UUID / hash does it look for an authentic metadata title or registered name.
  */
 export function resolvePdfDisplayName(
   rawName: string,
@@ -231,39 +244,41 @@ export function resolvePdfDisplayName(
   buffer?: ArrayBuffer | Uint8Array,
   sizeBytes?: number
 ): { name: string; pageCount?: number } {
-  // 1. Check known URI name registry
+  // 1. If rawName is already a proper human-readable filename, KEEP IT!
+  if (rawName && !isUuidOrHash(rawName)) {
+    let pageCount: number | undefined;
+    if (buffer) {
+      const info = extractPdfInfoFromBytes(buffer);
+      pageCount = info.pageCount;
+    }
+    return { name: cleanDocumentName(rawName), pageCount };
+  }
+
+  // 2. Check known URI name registry
   if (uri) {
     const known = getKnownPdfName(uri);
     if (known && !isUuidOrHash(known)) {
-      return { name: cleanDocumentName(known) };
+      let pageCount: number | undefined;
+      if (buffer) {
+        const info = extractPdfInfoFromBytes(buffer);
+        pageCount = info.pageCount;
+      }
+      return { name: cleanDocumentName(known), pageCount };
     }
   }
 
-  // 2. If rawName is already human-readable and not a UUID
-  if (rawName && !isUuidOrHash(rawName)) {
-    return { name: cleanDocumentName(rawName) };
-  }
-
-  // 3. If rawName is a UUID / hash, inspect the PDF binary bytes
+  // 3. If rawName is a UUID, attempt to extract a valid, non-junk title from PDF metadata
   if (buffer) {
     const info = extractPdfInfoFromBytes(buffer);
-    if (info.title) {
+    if (info.title && !isJunkTitle(info.title)) {
       return { name: info.title, pageCount: info.pageCount };
     }
     if (info.pageCount > 1) {
-      const sizeStr = sizeBytes
-        ? sizeBytes > 1024 * 1024
-          ? `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`
-          : `${Math.round(sizeBytes / 1024)} KB`
-        : '';
-      const fallback = sizeStr
-        ? `PDF Document (${sizeStr}).pdf`
-        : 'PDF Document.pdf';
-      return { name: fallback, pageCount: info.pageCount };
+      return { name: `Document (${info.pageCount} pages).pdf`, pageCount: info.pageCount };
     }
   }
 
-  // 4. Fallback formatting
+  // 4. Clean fallback for unknown UUID files
   const sizeStr = sizeBytes
     ? sizeBytes > 1024 * 1024
       ? `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`
@@ -271,7 +286,7 @@ export function resolvePdfDisplayName(
     : '';
 
   const fallback = sizeStr
-    ? `PDF Document (${sizeStr}).pdf`
-    : 'Device Document.pdf';
+    ? `Document (${sizeStr}).pdf`
+    : 'Document.pdf';
   return { name: fallback };
 }

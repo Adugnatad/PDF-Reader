@@ -7,6 +7,8 @@ import {
   resolvePdfDisplayName,
   registerKnownPdfName,
   getKnownPdfName,
+  cleanDocumentName,
+  extractPdfInfoFromBytes,
 } from '../utils/pdfNameResolver';
 
 export interface PickedFileResult {
@@ -71,7 +73,7 @@ async function requestStoragePermission(): Promise<boolean> {
 
 /**
  * Automatically scans device filesystem (Android Downloads, Documents, SDCard, and iOS Documents)
- * for all PDF documents and resolves authentic document titles and page counts from PDF metadata.
+ * for all PDF documents. Preserves real filenames and reads page counts.
  */
 export async function autoScanDevicePdfs(): Promise<DiscoveredPdfItem[]> {
   const discovered: DiscoveredPdfItem[] = [];
@@ -85,7 +87,7 @@ export async function autoScanDevicePdfs(): Promise<DiscoveredPdfItem[]> {
       // Continue scanning
     }
 
-    // 2. Build list of candidate directories
+    // 2. Build list of candidate directories (excluding temporary cache)
     const candidateDirs: Array<{
       path: string;
       folder: 'Downloads' | 'Documents' | 'Scans' | 'Books';
@@ -119,14 +121,10 @@ export async function autoScanDevicePdfs(): Promise<DiscoveredPdfItem[]> {
       candidateDirs.push({ path: '/storage/emulated/0/Books', folder: 'Books' });
     }
 
-    // iOS and general Expo FileSystem directories
+    // Permanent iOS and app document directories
     if (FileSystem.documentDirectory) {
       const cleanDoc = FileSystem.documentDirectory.replace('file://', '');
       candidateDirs.push({ path: cleanDoc, folder: 'Documents' });
-    }
-    if (FileSystem.cacheDirectory) {
-      const cleanCache = FileSystem.cacheDirectory.replace('file://', '');
-      candidateDirs.push({ path: cleanCache, folder: 'Documents' });
     }
 
     // 3. Scan each candidate directory
@@ -154,28 +152,28 @@ export async function autoScanDevicePdfs(): Promise<DiscoveredPdfItem[]> {
             try {
               const stat = await ReactNativeBlobUtil.fs.stat(fullPath);
               const fileUri = `file://${fullPath}`;
-              let displayName = filename;
+              let displayName = cleanDocumentName(filename);
               let pageCount = 1;
 
-              // Check if we already have a registered clean name for this URI
+              // Check if URI is already mapped to a user-specified name
               const known = getKnownPdfName(fileUri);
-              if (known && !isUuidOrHash(known)) {
+              if (known) {
                 displayName = known;
               } else if (isUuidOrHash(filename)) {
-                // If filename is a UUID/hash, inspect the PDF metadata
+                // If it is an anonymous UUID, resolve title or fallback
                 try {
                   const buffer = await readNativePdfBytes(fullPath);
                   if (buffer) {
                     const resolved = resolvePdfDisplayName(filename, fileUri, buffer, stat.size);
                     displayName = resolved.name;
                     if (resolved.pageCount) pageCount = resolved.pageCount;
-                    registerKnownPdfName(fileUri, displayName);
                   }
                 } catch {
-                  const resolved = resolvePdfDisplayName(filename, fileUri, undefined, stat.size);
-                  displayName = resolved.name;
+                  // fallback
                 }
               }
+
+              registerKnownPdfName(fileUri, displayName);
 
               discovered.push({
                 id: `native-pdf-${fullPath}`,
@@ -188,10 +186,9 @@ export async function autoScanDevicePdfs(): Promise<DiscoveredPdfItem[]> {
               });
             } catch {
               const fileUri = `file://${fullPath}`;
-              const fallback = resolvePdfDisplayName(filename, fileUri, undefined, 0);
               discovered.push({
                 id: `native-pdf-${fullPath}`,
-                name: fallback.name,
+                name: cleanDocumentName(filename),
                 size: 0,
                 uri: fileUri,
                 folder,
@@ -211,11 +208,11 @@ export async function autoScanDevicePdfs(): Promise<DiscoveredPdfItem[]> {
                     try {
                       const subStat = await ReactNativeBlobUtil.fs.stat(subFullPath);
                       const fileUri = `file://${subFullPath}`;
-                      let displayName = subFile;
+                      let displayName = cleanDocumentName(subFile);
                       let pageCount = 1;
 
                       const known = getKnownPdfName(fileUri);
-                      if (known && !isUuidOrHash(known)) {
+                      if (known) {
                         displayName = known;
                       } else if (isUuidOrHash(subFile)) {
                         try {
@@ -224,13 +221,13 @@ export async function autoScanDevicePdfs(): Promise<DiscoveredPdfItem[]> {
                             const resolved = resolvePdfDisplayName(subFile, fileUri, buffer, subStat.size);
                             displayName = resolved.name;
                             if (resolved.pageCount) pageCount = resolved.pageCount;
-                            registerKnownPdfName(fileUri, displayName);
                           }
                         } catch {
-                          const resolved = resolvePdfDisplayName(subFile, fileUri, undefined, subStat.size);
-                          displayName = resolved.name;
+                          // fallback
                         }
                       }
+
+                      registerKnownPdfName(fileUri, displayName);
 
                       discovered.push({
                         id: `native-pdf-${subFullPath}`,
@@ -243,10 +240,9 @@ export async function autoScanDevicePdfs(): Promise<DiscoveredPdfItem[]> {
                       });
                     } catch {
                       const fileUri = `file://${subFullPath}`;
-                      const fallback = resolvePdfDisplayName(subFile, fileUri, undefined, 0);
                       discovered.push({
                         id: `native-pdf-${subFullPath}`,
-                        name: fallback.name,
+                        name: cleanDocumentName(subFile),
                         size: 0,
                         uri: fileUri,
                         folder,
@@ -257,7 +253,7 @@ export async function autoScanDevicePdfs(): Promise<DiscoveredPdfItem[]> {
                 }
               }
             } catch {
-              // Ignore subdirectory permission restrictions
+              // ignore
             }
           }
         }
@@ -266,7 +262,7 @@ export async function autoScanDevicePdfs(): Promise<DiscoveredPdfItem[]> {
       }
     }
 
-    // 4. Also scan Expo FileSystem.documentDirectory directly (useful on iOS)
+    // 4. Scan Expo FileSystem.documentDirectory (permanent app storage)
     if (FileSystem.documentDirectory) {
       try {
         const expoFiles = await FileSystem.readDirectoryAsync(FileSystem.documentDirectory);
@@ -274,7 +270,7 @@ export async function autoScanDevicePdfs(): Promise<DiscoveredPdfItem[]> {
           if (file.toLowerCase().endsWith('.pdf')) {
             const fileUri = `${FileSystem.documentDirectory}${file}`;
             if (!discovered.some((d) => d.name === file || d.uri === fileUri)) {
-              let displayName = file;
+              let displayName = cleanDocumentName(file);
               let pageCount = 1;
               let size = 0;
 
@@ -286,7 +282,7 @@ export async function autoScanDevicePdfs(): Promise<DiscoveredPdfItem[]> {
               }
 
               const known = getKnownPdfName(fileUri);
-              if (known && !isUuidOrHash(known)) {
+              if (known) {
                 displayName = known;
               } else if (isUuidOrHash(file)) {
                 try {
@@ -295,13 +291,13 @@ export async function autoScanDevicePdfs(): Promise<DiscoveredPdfItem[]> {
                     const resolved = resolvePdfDisplayName(file, fileUri, buffer, size);
                     displayName = resolved.name;
                     if (resolved.pageCount) pageCount = resolved.pageCount;
-                    registerKnownPdfName(fileUri, displayName);
                   }
                 } catch {
-                  const resolved = resolvePdfDisplayName(file, fileUri, undefined, size);
-                  displayName = resolved.name;
+                  // fallback
                 }
               }
+
+              registerKnownPdfName(fileUri, displayName);
 
               discovered.push({
                 id: `expo-doc-${file}`,
@@ -371,8 +367,8 @@ export async function readNativePdfBytes(fileUriOrPath: string): Promise<ArrayBu
 }
 
 /**
- * Loads a PDF directly from native iOS / Android device storage
- * using expo-document-picker (Files app, Google Drive, Downloads, SD card).
+ * Loads a PDF directly from native iOS / Android device storage.
+ * Copies the file into permanent app document storage under its exact authentic name.
  */
 export async function pickPdfFromDevice(): Promise<PickedFileResult | null> {
   try {
@@ -387,7 +383,7 @@ export async function pickPdfFromDevice(): Promise<PickedFileResult | null> {
     }
 
     const asset = res.assets[0];
-    let name = asset.name || 'document.pdf';
+    const name = cleanDocumentName(asset.name || 'document.pdf');
     let buffer: ArrayBuffer | null = null;
 
     try {
@@ -408,20 +404,32 @@ export async function pickPdfFromDevice(): Promise<PickedFileResult | null> {
       throw new Error('Unable to read selected PDF file data from native device');
     }
 
-    let pageCount: number | undefined;
-    if (buffer) {
-      const resolved = resolvePdfDisplayName(name, asset.uri, buffer, asset.size || buffer.byteLength);
-      name = resolved.name;
-      pageCount = resolved.pageCount;
+    // Copy to permanent documentDirectory under its real filename
+    let permanentUri = asset.uri;
+    if (FileSystem.documentDirectory && name) {
+      try {
+        const targetPath = `${FileSystem.documentDirectory}${name}`;
+        await FileSystem.copyAsync({ from: asset.uri, to: targetPath });
+        permanentUri = targetPath;
+      } catch (copyErr) {
+        console.warn('Document copy note:', copyErr);
+      }
     }
 
+    let pageCount: number | undefined;
+    if (buffer) {
+      const info = extractPdfInfoFromBytes(buffer);
+      pageCount = info.pageCount;
+    }
+
+    registerKnownPdfName(permanentUri, name);
     registerKnownPdfName(asset.uri, name);
 
     return {
       name,
       size: asset.size || buffer.byteLength,
       buffer,
-      uri: asset.uri,
+      uri: permanentUri,
       pageCount,
     };
   } catch (err) {
@@ -471,6 +479,7 @@ export async function scanDeviceStorage(): Promise<PickedFileResult[]> {
     const results: PickedFileResult[] = [];
     for (const asset of res.assets) {
       try {
+        const name = cleanDocumentName(asset.name || 'document.pdf');
         let buffer: ArrayBuffer | null = null;
         try {
           const response = await fetch(asset.uri);
@@ -483,21 +492,30 @@ export async function scanDeviceStorage(): Promise<PickedFileResult[]> {
         }
 
         if (buffer) {
-          const resolved = resolvePdfDisplayName(
-            asset.name || 'document.pdf',
-            asset.uri,
-            buffer,
-            asset.size || buffer.byteLength
-          );
-          const name = resolved.name;
+          let permanentUri = asset.uri;
+          if (FileSystem.documentDirectory && name) {
+            try {
+              const targetPath = `${FileSystem.documentDirectory}${name}`;
+              await FileSystem.copyAsync({ from: asset.uri, to: targetPath });
+              permanentUri = targetPath;
+            } catch {
+              // fallback
+            }
+          }
+
+          let pageCount: number | undefined;
+          const info = extractPdfInfoFromBytes(buffer);
+          pageCount = info.pageCount;
+
+          registerKnownPdfName(permanentUri, name);
           registerKnownPdfName(asset.uri, name);
 
           results.push({
             name,
             size: asset.size || buffer.byteLength,
             buffer,
-            uri: asset.uri,
-            pageCount: resolved.pageCount,
+            uri: permanentUri,
+            pageCount,
           });
         }
       } catch (err) {
