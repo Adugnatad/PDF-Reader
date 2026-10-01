@@ -25,13 +25,13 @@ class PdfStoreService {
   private userFiles: DocFile[] = [];
   private nativeUriMap: Map<string, string> = new Map();
   private listeners: Set<() => void> = new Set();
-  private isScanning = false;
+  private scanPromise: Promise<DocFile[]> | null = null;
 
   constructor() {
     // Automatically scan native device for PDF files on startup
-    setTimeout(() => {
+    Promise.resolve().then(() => {
       this.scanDeviceAutomatically().catch(() => {});
-    }, 100);
+    });
   }
 
   public subscribe(listener: () => void): () => void {
@@ -48,10 +48,11 @@ class PdfStoreService {
    */
   public registerDiscoveredDevicePdfs(items: DiscoveredPdfItem[]): DocFile[] {
     let changed = false;
+    const nextFiles = [...this.userFiles];
 
     for (const item of items) {
       // Check if already in userFiles (by id or uri or name)
-      const existing = this.userFiles.find(
+      const existing = nextFiles.find(
         (f) =>
           f.id === item.id ||
           (f.name === item.name && this.nativeUriMap.get(f.id) === item.uri)
@@ -90,35 +91,42 @@ class PdfStoreService {
       this.nativeUriMap.set(item.id, item.uri);
       this.nativeUriMap.set(item.name, item.uri);
 
-      this.userFiles.push(docFile);
+      nextFiles.push(docFile);
       changed = true;
     }
 
     if (changed) {
+      this.userFiles = nextFiles;
       this.notify();
     }
-    return this.userFiles;
+    return [...this.userFiles];
   }
 
   /**
-   * Automatically scans device storage (Downloads, Documents, etc.) for PDFs
+   * Automatically scans device storage (Downloads, Documents, etc.) for PDFs.
+   * If a scan is already running, returns the in-flight scan promise so all callers
+   * wait for and receive the resulting documents without race conditions.
    */
   public async scanDeviceAutomatically(): Promise<DocFile[]> {
-    if (this.isScanning) return this.userFiles;
-    this.isScanning = true;
-
-    try {
-      const items = await autoScanDevicePdfs();
-      if (items && items.length > 0) {
-        this.registerDiscoveredDevicePdfs(items);
-      }
-    } catch (err) {
-      console.warn('Auto scan device error:', err);
-    } finally {
-      this.isScanning = false;
+    if (this.scanPromise) {
+      return this.scanPromise;
     }
 
-    return this.userFiles;
+    this.scanPromise = (async () => {
+      try {
+        const items = await autoScanDevicePdfs();
+        if (items && items.length > 0) {
+          this.registerDiscoveredDevicePdfs(items);
+        }
+      } catch (err) {
+        console.warn('Auto scan device error:', err);
+      } finally {
+        this.scanPromise = null;
+      }
+      return [...this.userFiles];
+    })();
+
+    return this.scanPromise;
   }
 
   public getNativeUri(idOrTitle: string): string | undefined {
@@ -272,7 +280,7 @@ class PdfStoreService {
       selected: true,
     };
 
-    this.userFiles.unshift(docFile);
+    this.userFiles = [docFile, ...this.userFiles];
     this.notify();
     return docFile;
   }
@@ -293,7 +301,7 @@ class PdfStoreService {
   }
 
   public getUserFiles(): DocFile[] {
-    return this.userFiles;
+    return [...this.userFiles];
   }
 
   public getAllFiles(): DocFile[] {

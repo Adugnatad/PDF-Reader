@@ -69,8 +69,12 @@ export async function autoScanDevicePdfs(): Promise<DiscoveredPdfItem[]> {
   const visitedPaths = new Set<string>();
 
   try {
-    // 1. Request permissions if Android
-    await requestStoragePermission();
+    // 1. Request permissions if Android (safe and non-blocking)
+    try {
+      await requestStoragePermission();
+    } catch {
+      // Continue to scanning regardless
+    }
 
     // 2. Build list of candidate directories
     const candidateDirs: Array<{

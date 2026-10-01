@@ -9,6 +9,7 @@ import {
   Platform,
 } from 'react-native';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
+import { useFocusEffect } from 'expo-router';
 import { DocFile } from '../types';
 import { pdfStore } from '../services/pdfStore';
 import { pickPdfFromDevice, scanDeviceStorage } from '../services/nativeFilePicker';
@@ -36,14 +37,41 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
     setDeviceFiles(files);
   }, [files]);
 
-  // Automatically scan device on mount
+  // Subscribe to pdfStore updates and automatically scan device on mount
   React.useEffect(() => {
-    pdfStore.scanDeviceAutomatically().then((found) => {
-      if (found && found.length > 0) {
-        setDeviceFiles(found);
-      }
-    }).catch(() => {});
+    const unsub = pdfStore.subscribe(() => {
+      setDeviceFiles(pdfStore.getAllFiles());
+    });
+
+    setIsScanning(true);
+    pdfStore
+      .scanDeviceAutomatically()
+      .then((found) => {
+        if (found && found.length > 0) {
+          setDeviceFiles([...found]);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        setIsScanning(false);
+      });
+
+    return unsub;
   }, []);
+
+  // Re-check for new PDF files whenever home screen gains focus
+  useFocusEffect(
+    React.useCallback(() => {
+      pdfStore
+        .scanDeviceAutomatically()
+        .then((found) => {
+          if (found && found.length > 0) {
+            setDeviceFiles([...found]);
+          }
+        })
+        .catch(() => {});
+    }, [])
+  );
 
   // Load PDF file from device (iOS / Android / Web)
   const handleOpenDeviceFile = async () => {

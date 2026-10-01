@@ -43,6 +43,12 @@ export const usePathname = () => {
   return ctx.location.pathname;
 };
 
+export const useFocusEffect = (effect: () => void | (() => void)) => {
+  useEffect(() => {
+    return effect();
+  }, [effect]);
+};
+
 // Global route components registry loaded from /app
 const routeModules: Record<string, any> = import.meta.glob('/app/**/*.{tsx,jsx,ts,js}', { eager: true });
 
