@@ -154,7 +154,8 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
         setActiveTitle(item.name);
 
         if (Platform.OS !== "web") {
-          const directUri = item.nativeUri || (await getPdfLocalUri(item.data, item.name));
+          const directUri =
+            item.nativeUri || (await getPdfLocalUri(item.data, item.name));
           if (isCancelled) return;
           setNativePdfUri(directUri);
         }
@@ -1270,14 +1271,9 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
             </TouchableOpacity>
           </View> */}
 
-          {/* BOTTOM BAR ITEMS: View Mode, Edit, Settings */}
-          <TouchableOpacity
-            style={styles.viewModeBottomInner}
-            onPress={() => setShowViewModeModal(true)}
-            activeOpacity={0.7}
-            accessibilityLabel="View Mode"
-            accessibilityRole="button"
-          >
+          {/* PROMINENT VIEW MODE BUTTON AT BOTTOM */}
+
+          <TouchableOpacity style={styles.viewModeBottomInner}>
             <MaterialIcons name="book" size={23} color="#fff" />
             <Text style={styles.viewModeBtnTitle}>View Mode</Text>
           </TouchableOpacity>
