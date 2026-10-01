@@ -1282,7 +1282,10 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
 
           {/* PROMINENT VIEW MODE BUTTON AT BOTTOM */}
 
-          <TouchableOpacity style={styles.viewModeBottomInner}>
+          <TouchableOpacity
+            style={styles.viewModeBottomInner}
+            onPress={() => setShowViewModeModal(true)}
+          >
             <MaterialIcons name="book" size={23} color="#fff" />
             <Text style={styles.viewModeBtnTitle}>View Mode</Text>
           </TouchableOpacity>
