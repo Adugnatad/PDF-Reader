@@ -52,6 +52,19 @@ export function isUuidOrHash(name: string): boolean {
   return false;
 }
 
+export function isJunkDocument(name: string, id?: string): boolean {
+  const n = (name || '').toLowerCase().trim();
+  const i = (id || '').toLowerCase().trim();
+  if (n.startsWith('expo-file') || i.includes('expo-file')) return true;
+  if (n.includes('data user 0') || i.includes('data user 0')) return true;
+  if (n.includes('com.adugna12') || i.includes('com.adugna12')) return true;
+  if (n.startsWith('device-pdf-') || i.startsWith('device-pdf-')) return true;
+  if (n === 'document.pdf' || n.startsWith('document.') || n.startsWith('document (')) return true;
+  if (i.includes('app-doc-expo')) return true;
+  if (n.includes('tmp_') || n.includes('cache_')) return true;
+  return false;
+}
+
 /**
  * Detects generic junk titles like "Untitled", "Microsoft Word - Document1"
  */

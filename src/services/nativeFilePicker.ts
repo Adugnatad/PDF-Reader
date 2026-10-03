@@ -49,6 +49,10 @@ export async function autoScanDevicePdfs(): Promise<DiscoveredPdfItem[]> {
   return [];
 }
 
+export async function promptAndScanDeviceStorage(): Promise<DiscoveredPdfItem[]> {
+  return await autoScanDevicePdfs();
+}
+
 /**
  * Web Implementation of File Picking
  * Uses window.showOpenFilePicker when available, falling back to a hidden file input.

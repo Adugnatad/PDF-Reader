@@ -16,6 +16,7 @@ import {
   registerKnownPdfName,
   getKnownPdfName,
   extractPdfInfoFromBytes,
+  isJunkDocument,
 } from '../utils/pdfNameResolver';
 import { saveRegistryToDisk, loadRegistryFromDisk } from './storageHelper';
 
@@ -79,18 +80,11 @@ class PdfStoreService {
       if (raw) {
         const parsed = JSON.parse(raw);
         if (parsed.files && Array.isArray(parsed.files)) {
-          // Sanitize: Purge legacy corrupted entries (device-pdf-..., Document.pdf duplicates)
+          // Sanitize: Purge legacy corrupted entries (expo-file, device-pdf, Document.pdf duplicates)
           const sanitizedFiles: DocFile[] = [];
           for (const f of parsed.files) {
             if (!f || !f.name) continue;
-            // Purge temporary ID names
-            if (f.name.startsWith('device-pdf-') || f.id.startsWith('device-pdf-')) {
-              continue;
-            }
-            // Purge generic Document.pdf
-            if (f.name.toLowerCase() === 'document.pdf') {
-              continue;
-            }
+            if (isJunkDocument(f.name, f.id)) continue;
             // Avoid duplicate by name
             const isDup = sanitizedFiles.some(
               (s) => s.name.toLowerCase() === f.name.toLowerCase()
@@ -103,7 +97,7 @@ class PdfStoreService {
         }
         if (parsed.uriMap && typeof parsed.uriMap === 'object') {
           for (const [k, v] of Object.entries(parsed.uriMap)) {
-            if (!k.startsWith('device-pdf-') && k.toLowerCase() !== 'document.pdf') {
+            if (!isJunkDocument(k)) {
               this.nativeUriMap.set(k, v as string);
               registerKnownPdfName(v as string, k);
             }
@@ -126,18 +120,13 @@ class PdfStoreService {
     // Filter out invalid, zero-byte, or cache items
     const validDiscovered = items.filter((item) => {
       if (!item.name || item.size <= 10) return false;
-      if (item.name.startsWith('device-pdf-')) return false;
-      if (item.name.toLowerCase() === 'document.pdf') return false;
+      if (isJunkDocument(item.name, item.id)) return false;
       if (item.uri && (item.uri.includes('/cache/') || item.uri.includes('DocumentPicker'))) return false;
       return true;
     });
 
-    // Start with existing userFiles, purging any legacy device-pdf-... or generic Document.pdf junk
-    let cleanFiles = this.userFiles.filter((f) => {
-      if (f.name.startsWith('device-pdf-') || f.id.startsWith('device-pdf-')) return false;
-      if (f.name.toLowerCase() === 'document.pdf') return false;
-      return true;
-    });
+    // Start with existing userFiles, purging any legacy junk
+    let cleanFiles = this.userFiles.filter((f) => !isJunkDocument(f.name, f.id));
 
     if (cleanFiles.length !== this.userFiles.length) {
       changed = true;
@@ -145,6 +134,8 @@ class PdfStoreService {
 
     for (const item of validDiscovered) {
       const realName = cleanDocumentName(item.name);
+      if (isJunkDocument(realName)) continue;
+
       const sizeInMb = (item.size / (1024 * 1024)).toFixed(1);
       const sizeStr =
         item.size > 1024 * 1024
@@ -216,6 +207,7 @@ class PdfStoreService {
     // Strict deduplication: ensure each file name only appears ONCE
     const dedupedFiles: DocFile[] = [];
     for (const f of cleanFiles) {
+      if (isJunkDocument(f.name, f.id)) continue;
       if (!dedupedFiles.some((d) => d.name.toLowerCase() === f.name.toLowerCase())) {
         dedupedFiles.push(f);
       } else {
@@ -488,11 +480,11 @@ class PdfStoreService {
   }
 
   public getUserFiles(): DocFile[] {
-    return [...this.userFiles];
+    return this.userFiles.filter((f) => !isJunkDocument(f.name, f.id));
   }
 
   public getAllFiles(): DocFile[] {
-    return [...this.userFiles];
+    return this.userFiles.filter((f) => !isJunkDocument(f.name, f.id));
   }
 
   /**

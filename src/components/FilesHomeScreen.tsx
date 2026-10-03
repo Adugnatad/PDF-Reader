@@ -13,7 +13,11 @@ import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
 import { DocFile } from '../types';
 import { pdfStore } from '../services/pdfStore';
-import { pickPdfFromDevice, scanDeviceStorage } from '../services/nativeFilePicker';
+import {
+  pickPdfFromDevice,
+  scanDeviceStorage,
+  promptAndScanDeviceStorage,
+} from '../services/nativeFilePicker';
 import { isUuidOrHash, resolvePdfDisplayName } from '../utils/pdfNameResolver';
 
 interface FilesHomeScreenProps {
@@ -102,12 +106,21 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
 
     try {
       const initialCount = pdfStore.getUserFiles().length;
-      const autoFound = await pdfStore.scanDeviceAutomatically();
+      await pdfStore.scanDeviceAutomatically();
+
+      // On Android, prompt user to select/confirm Documents folder via StorageAccessFramework
+      if (Platform.OS === 'android') {
+        const safItems = await promptAndScanDeviceStorage();
+        if (safItems && safItems.length > 0) {
+          pdfStore.registerDiscoveredDevicePdfs(safItems);
+        }
+      }
+
       const currentFiles = pdfStore.getAllFiles();
       setDeviceFiles(currentFiles);
 
-      if (autoFound.length > initialCount) {
-        const diff = autoFound.length - initialCount;
+      if (currentFiles.length > initialCount) {
+        const diff = currentFiles.length - initialCount;
         onShowToast(`Found ${diff} new PDF document${diff === 1 ? '' : 's'} on device`);
       } else if (currentFiles.length > 0) {
         onShowToast(`Scan complete: ${currentFiles.length} document${currentFiles.length === 1 ? '' : 's'} ready`);
