@@ -30,7 +30,16 @@ export async function getPdfLocalUri(pdfBytes: Uint8Array | ArrayBuffer, fileNam
 
   const safeName = (fileName || 'document.pdf').replace(/[^a-zA-Z0-9._-]/g, '_');
   const targetName = safeName.endsWith('.pdf') ? safeName : `${safeName}.pdf`;
-  const fileUri = `${FileSystem.cacheDirectory}${targetName}`;
+  const viewerCacheDir = `${FileSystem.cacheDirectory}viewer_cache/`;
+
+  try {
+    const dirInfo = await FileSystem.getInfoAsync(viewerCacheDir);
+    if (!dirInfo.exists) {
+      await FileSystem.makeDirectoryAsync(viewerCacheDir, { intermediates: true });
+    }
+  } catch {}
+
+  const fileUri = `${viewerCacheDir}${targetName}`;
 
   const base64 = fastUint8ToBase64(bytes);
   await FileSystem.writeAsStringAsync(fileUri, base64, {

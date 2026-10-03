@@ -79,12 +79,34 @@ class PdfStoreService {
       if (raw) {
         const parsed = JSON.parse(raw);
         if (parsed.files && Array.isArray(parsed.files)) {
-          this.userFiles = parsed.files;
+          // Sanitize: Purge legacy corrupted entries (device-pdf-..., Document.pdf duplicates)
+          const sanitizedFiles: DocFile[] = [];
+          for (const f of parsed.files) {
+            if (!f || !f.name) continue;
+            // Purge temporary ID names
+            if (f.name.startsWith('device-pdf-') || f.id.startsWith('device-pdf-')) {
+              continue;
+            }
+            // Purge generic Document.pdf
+            if (f.name.toLowerCase() === 'document.pdf') {
+              continue;
+            }
+            // Avoid duplicate by name
+            const isDup = sanitizedFiles.some(
+              (s) => s.name.toLowerCase() === f.name.toLowerCase()
+            );
+            if (!isDup) {
+              sanitizedFiles.push(f);
+            }
+          }
+          this.userFiles = sanitizedFiles;
         }
         if (parsed.uriMap && typeof parsed.uriMap === 'object') {
           for (const [k, v] of Object.entries(parsed.uriMap)) {
-            this.nativeUriMap.set(k, v as string);
-            registerKnownPdfName(v as string, k);
+            if (!k.startsWith('device-pdf-') && k.toLowerCase() !== 'document.pdf') {
+              this.nativeUriMap.set(k, v as string);
+              registerKnownPdfName(v as string, k);
+            }
           }
         }
         this.notify();
@@ -100,41 +122,29 @@ class PdfStoreService {
    */
   public registerDiscoveredDevicePdfs(items: DiscoveredPdfItem[]): DocFile[] {
     let changed = false;
-    const nextFiles = [...this.userFiles];
 
-    for (const item of items) {
-      let displayName = cleanDocumentName(item.name);
-      let pageCount = item.pageCount || 1;
+    // Filter out invalid, zero-byte, or cache items
+    const validDiscovered = items.filter((item) => {
+      if (!item.name || item.size <= 10) return false;
+      if (item.name.startsWith('device-pdf-')) return false;
+      if (item.name.toLowerCase() === 'document.pdf') return false;
+      if (item.uri && (item.uri.includes('/cache/') || item.uri.includes('DocumentPicker'))) return false;
+      return true;
+    });
 
-      // Check known clean name
-      const known = getKnownPdfName(item.uri);
-      if (known) {
-        displayName = known;
-      }
+    // Start with existing userFiles, purging any legacy device-pdf-... or generic Document.pdf junk
+    let cleanFiles = this.userFiles.filter((f) => {
+      if (f.name.startsWith('device-pdf-') || f.id.startsWith('device-pdf-')) return false;
+      if (f.name.toLowerCase() === 'document.pdf') return false;
+      return true;
+    });
 
-      // Check if already in userFiles
-      const existingIndex = nextFiles.findIndex(
-        (f) =>
-          f.id === item.id ||
-          this.nativeUriMap.get(f.id) === item.uri ||
-          f.name === displayName
-      );
+    if (cleanFiles.length !== this.userFiles.length) {
+      changed = true;
+    }
 
-      if (existingIndex >= 0) {
-        // If existing file has a UUID or ugly name and we have a clean name, update it!
-        if (isUuidOrHash(nextFiles[existingIndex].name) && !isUuidOrHash(displayName)) {
-          nextFiles[existingIndex] = {
-            ...nextFiles[existingIndex],
-            name: displayName,
-            pageCount: pageCount || nextFiles[existingIndex].pageCount,
-          };
-          this.nativeUriMap.set(displayName, item.uri);
-          registerKnownPdfName(item.uri, displayName);
-          changed = true;
-        }
-        continue;
-      }
-
+    for (const item of validDiscovered) {
+      const realName = cleanDocumentName(item.name);
       const sizeInMb = (item.size / (1024 * 1024)).toFixed(1);
       const sizeStr =
         item.size > 1024 * 1024
@@ -150,30 +160,71 @@ class PdfStoreService {
         });
       }
 
-      const docFile: DocFile = {
-        id: item.id,
-        name: displayName,
-        type: 'pdf',
-        size: sizeStr,
-        modified: modStr,
-        source: 'Device Storage',
-        status: 'Device',
-        pageCount,
-        folder: item.folder || 'Documents',
-        favorite: false,
-        selected: false,
-      };
+      // Check if file already exists in userFiles by URI or name, or if it matches an ugly title
+      const existingIdx = cleanFiles.findIndex((f) => {
+        const mappedUri = this.nativeUriMap.get(f.id) || this.nativeUriMap.get(f.name);
+        if (mappedUri && mappedUri === item.uri) return true;
+        if (f.name.toLowerCase() === realName.toLowerCase()) return true;
+        if (
+          (f.name.toLowerCase().includes('visuals') || isUuidOrHash(f.name)) &&
+          Math.abs(parseFloat(f.size) - parseFloat(sizeInMb)) < 0.5
+        ) {
+          return true;
+        }
+        return false;
+      });
 
-      registerKnownPdfName(item.uri, displayName);
-      this.nativeUriMap.set(item.id, item.uri);
-      this.nativeUriMap.set(displayName, item.uri);
+      if (existingIdx >= 0) {
+        const existing = cleanFiles[existingIdx];
+        if (existing.name !== realName || existing.size !== sizeStr) {
+          cleanFiles[existingIdx] = {
+            ...existing,
+            name: realName,
+            size: sizeStr,
+            modified: modStr,
+            source: 'Device Storage',
+          };
+          this.nativeUriMap.set(existing.id, item.uri);
+          this.nativeUriMap.set(realName, item.uri);
+          registerKnownPdfName(item.uri, realName);
+          changed = true;
+        }
+      } else {
+        const newDoc: DocFile = {
+          id: item.id,
+          name: realName,
+          type: 'pdf',
+          size: sizeStr,
+          modified: modStr,
+          source: 'Device Storage',
+          status: 'Device',
+          pageCount: item.pageCount || 1,
+          folder: item.folder || 'Documents',
+          favorite: false,
+          selected: false,
+        };
 
-      nextFiles.push(docFile);
-      changed = true;
+        this.nativeUriMap.set(item.id, item.uri);
+        this.nativeUriMap.set(realName, item.uri);
+        registerKnownPdfName(item.uri, realName);
+
+        cleanFiles.push(newDoc);
+        changed = true;
+      }
     }
 
+    // Strict deduplication: ensure each file name only appears ONCE
+    const dedupedFiles: DocFile[] = [];
+    for (const f of cleanFiles) {
+      if (!dedupedFiles.some((d) => d.name.toLowerCase() === f.name.toLowerCase())) {
+        dedupedFiles.push(f);
+      } else {
+        changed = true;
+      }
+    }
+
+    this.userFiles = dedupedFiles;
     if (changed) {
-      this.userFiles = nextFiles;
       this.saveToStorage();
       this.notify();
     }
@@ -356,8 +407,13 @@ class PdfStoreService {
     folder: 'Downloads' | 'Documents' | 'Scans' | 'Books' = 'Documents',
     nativeUri?: string
   ): DocFile {
-    const id = `device-pdf-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-    const resolvedName = cleanDocumentName(file.name);
+    const rawClean = cleanDocumentName(file.name);
+    const resolvedName =
+      rawClean && !rawClean.startsWith('device-pdf-')
+        ? rawClean
+        : 'Document.pdf';
+    const safeId = resolvedName.replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase();
+    const id = nativeUri ? `native-${nativeUri}` : `doc-${safeId}`;
 
     let pageCount = 1;
     if (buffer) {
@@ -406,7 +462,10 @@ class PdfStoreService {
       selected: true,
     };
 
-    this.userFiles = [docFile, ...this.userFiles.filter((f) => f.name !== resolvedName)];
+    this.userFiles = [
+      docFile,
+      ...this.userFiles.filter((f) => f.name.toLowerCase() !== resolvedName.toLowerCase()),
+    ];
     this.saveToStorage();
     this.notify();
     return docFile;

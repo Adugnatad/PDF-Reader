@@ -51,10 +51,8 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
     setIsScanning(true);
     pdfStore
       .scanDeviceAutomatically()
-      .then((found) => {
-        if (found && found.length > 0) {
-          setDeviceFiles([...found]);
-        }
+      .then(() => {
+        setDeviceFiles(pdfStore.getAllFiles());
       })
       .catch(() => {})
       .finally(() => {
@@ -69,10 +67,8 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
     React.useCallback(() => {
       pdfStore
         .scanDeviceAutomatically()
-        .then((found) => {
-          if (found && found.length > 0) {
-            setDeviceFiles([...found]);
-          }
+        .then(() => {
+          setDeviceFiles(pdfStore.getAllFiles());
         })
         .catch(() => {});
     }, [])
