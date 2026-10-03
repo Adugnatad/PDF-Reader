@@ -21,14 +21,8 @@
       "adaptiveIcon": {
         "backgroundColor": "#0b1326"
       },
-      "package": "com.adugna12.docuflowconsole",
-      "permissions": [
-        "READ_EXTERNAL_STORAGE",
-        "WRITE_EXTERNAL_STORAGE",
-        "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.WRITE_EXTERNAL_STORAGE",
-        "android.permission.MANAGE_EXTERNAL_STORAGE"
-      ]
+      "permissions": ["MANAGE_EXTERNAL_STORAGE"],
+      "package": "com.adugna12.docuflowconsole"
     },
     "web": {
       "favicon": "./public/assets/aistudio/favicon.png",
