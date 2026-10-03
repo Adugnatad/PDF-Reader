@@ -109,7 +109,8 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
           if (typeof saved.reflow === "boolean") setReflow(saved.reflow);
           if (saved.reflowFontSize) setReflowFontSize(saved.reflowFontSize);
           if (saved.theme) setTheme(saved.theme);
-          if (saved.readingDirection) setReadingDirection(saved.readingDirection);
+          if (saved.readingDirection)
+            setReadingDirection(saved.readingDirection);
         }
       } catch (err) {
         console.warn("Could not load view mode settings:", err);
@@ -132,7 +133,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
         readingDirection,
       });
     },
-    [reflow, reflowFontSize, theme, readingDirection]
+    [reflow, reflowFontSize, theme, readingDirection],
   );
 
   const handleUpdateReflow = useCallback(
@@ -146,7 +147,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
         readingDirection,
       });
     },
-    [viewMode, reflowFontSize, theme, readingDirection]
+    [viewMode, reflowFontSize, theme, readingDirection],
   );
 
   const handleUpdateFontSize = useCallback(
@@ -160,7 +161,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
         readingDirection,
       });
     },
-    [viewMode, reflow, theme, readingDirection]
+    [viewMode, reflow, theme, readingDirection],
   );
 
   const handleUpdateTheme = useCallback(
@@ -174,7 +175,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
         readingDirection,
       });
     },
-    [viewMode, reflow, reflowFontSize, readingDirection]
+    [viewMode, reflow, reflowFontSize, readingDirection],
   );
 
   const handleUpdateReadingDirection = useCallback(
@@ -188,7 +189,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
         readingDirection: dir,
       });
     },
-    [viewMode, reflow, reflowFontSize, theme]
+    [viewMode, reflow, reflowFontSize, theme],
   );
 
   const [showViewModeModal, setShowViewModeModal] = useState<boolean>(false);
@@ -915,7 +916,9 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
               </View>
               <View style={styles.reflowControls}>
                 <TouchableOpacity
-                  onPress={() => handleUpdateFontSize(Math.max(12, reflowFontSize - 2))}
+                  onPress={() =>
+                    handleUpdateFontSize(Math.max(12, reflowFontSize - 2))
+                  }
                   style={styles.reflowBtn}
                   accessibilityLabel="Decrease Font Size"
                 >
@@ -929,7 +932,9 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                 </View>
 
                 <TouchableOpacity
-                  onPress={() => handleUpdateFontSize(Math.min(32, reflowFontSize + 2))}
+                  onPress={() =>
+                    handleUpdateFontSize(Math.min(32, reflowFontSize + 2))
+                  }
                   style={styles.reflowBtn}
                   accessibilityLabel="Increase Font Size"
                 >
@@ -972,221 +977,191 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
           !loadError &&
           !reflow &&
           (Platform.OS !== "web" || viewMode === "single") && (
-          <View style={styles.pageOuterWrapper}>
-            {/* Floating Lateral Navigation Chevron Arrows (for Horizontal Reading Direction) */}
-            {readingDirection === "horizontal" && viewMode === "single" && (
-              <>
-                <TouchableOpacity
-                  onPress={handlePrevPage}
-                  disabled={currentPage <= 1}
-                  style={[
-                    styles.floatingSideBtn,
-                    styles.floatingSideLeft,
-                    currentPage <= 1 && styles.floatingSideDisabled,
-                  ]}
-                  accessibilityLabel="Previous Page"
-                >
-                  <Ionicons
-                    name="chevron-back"
-                    size={22}
-                    color={currentPage <= 1 ? "#475569" : "#ffffff"}
-                  />
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  onPress={handleNextPage}
-                  disabled={currentPage >= numPages}
-                  style={[
-                    styles.floatingSideBtn,
-                    styles.floatingSideRight,
-                    currentPage >= numPages && styles.floatingSideDisabled,
-                  ]}
-                  accessibilityLabel="Next Page"
-                >
-                  <Ionicons
-                    name="chevron-forward"
-                    size={22}
-                    color={currentPage >= numPages ? "#475569" : "#ffffff"}
-                  />
-                </TouchableOpacity>
-              </>
-            )}
-
-            <View
-              style={[
-                styles.pdfPaper,
-                {
-                  backgroundColor: t.paperBg,
-                  borderColor: "transparent",
-                  width: zoom > 1 ? `${Math.round(zoom * 100)}%` : "100%",
-                },
-              ]}
-            >
-              {/* Canvas viewport container */}
+            <View style={styles.pageOuterWrapper}>
               <View
                 style={[
-                  styles.canvasRelativeWrapper,
+                  styles.pdfPaper,
                   {
-                    width: "100%",
-                    filter: t.canvasFilter as any,
+                    backgroundColor: t.paperBg,
+                    borderColor: "transparent",
+                    width: zoom > 1 ? `${Math.round(zoom * 100)}%` : "100%",
                   },
                 ]}
-                {...(Platform.OS === "web"
-                  ? {
-                      onClick: (e: any) => {
-                        handleCanvasClick(e);
-                        handleSingleTap();
-                      },
-                      onMouseDown: startDrawing,
-                      onMouseMove: drawMove,
-                      onMouseUp: stopDrawing,
-                      onMouseLeave: stopDrawing,
-                    }
-                  : {})}
               >
-                {/* Visual PDF Document View: Using react-native-pdf Package */}
-                {pdfSource.uri ? (
-                  <Pdf
-                    ref={canvasRef as any}
-                    source={pdfSource}
-                    scale={zoom}
-                    fitPolicy={0}
-                    enablePaging={viewMode === "single"}
-                    enableAntialiasing={true}
-                    spacing={10}
-                    horizontal={readingDirection === "horizontal"}
-                    onPageSingleTap={handleSingleTap}
-                    onScaleChanged={(scale) => {
-                      setZoom(scale);
-                      triggerPageInteraction();
-                    }}
-                    onLoadComplete={(loadedPages) => {
-                      setNumPages(loadedPages);
-                      setIsLoading(false);
-                      triggerPageInteraction();
-                    }}
-                    onPageChanged={(page, total) => {
-                      setCurrentPage((prev) => (prev !== page ? page : prev));
-                      setNumPages((prev) => (prev !== total ? total : prev));
-                      triggerPageInteraction();
-                    }}
-                    onError={(err) => {
-                      console.warn("react-native-pdf view note:", err);
-                    }}
-                    style={styles.pdfViewer}
-                  />
-                ) : (
-                  <ActivityIndicator size="small" color="#7bd0ff" />
-                )}
-
-                {/* Freehand Drawing Overlay Canvas */}
-                {Platform.OS === "web" && (
-                  <canvas
-                    ref={drawCanvasRef}
-                    style={{
-                      position: "absolute",
-                      top: 0,
-                      left: 0,
+                {/* Canvas viewport container */}
+                <View
+                  style={[
+                    styles.canvasRelativeWrapper,
+                    {
                       width: "100%",
-                      height: "100%",
-                      pointerEvents:
-                        activeTool === "pen" || activeTool === "highlighter"
-                          ? "auto"
-                          : "none",
-                      maxWidth: "100%",
-                    }}
-                  />
-                )}
-
-                {/* Notes and Stamps Overlays */}
-                {notes
-                  .filter((n) => n.page === currentPage)
-                  .map((note) => (
-                    <View
-                      key={note.id}
-                      style={[
-                        styles.notePin,
-                        { top: `${note.y}%` as any, left: `${note.x}%` as any },
-                      ]}
-                    >
-                      <TouchableOpacity
-                        onPress={() => setActiveNoteEditing(note.id)}
-                        style={styles.notePinIcon}
-                      >
-                        <Ionicons name="chatbubble" size={20} color="#f59e0b" />
-                      </TouchableOpacity>
-                      {activeNoteEditing === note.id && (
-                        <View style={styles.noteEditorCard}>
-                          <TextInput
-                            value={newNoteInput}
-                            onChangeText={setNewNoteInput}
-                            style={styles.noteEditorInput}
-                            multiline
-                          />
-                          <View style={styles.noteEditorActions}>
-                            <TouchableOpacity
-                              onPress={() => {
-                                setNotes((prev) =>
-                                  prev.map((n) =>
-                                    n.id === note.id
-                                      ? { ...n, text: newNoteInput }
-                                      : n,
-                                  ),
-                                );
-                                setActiveNoteEditing(null);
-                                onShowToast("Note updated");
-                              }}
-                              style={styles.noteSaveBtn}
-                            >
-                              <Text style={styles.noteSaveBtnText}>Save</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                              onPress={() => {
-                                setNotes((prev) =>
-                                  prev.filter((n) => n.id !== note.id),
-                                );
-                                setActiveNoteEditing(null);
-                              }}
-                              style={styles.noteDeleteBtn}
-                            >
-                              <Text style={styles.noteDeleteBtnText}>
-                                Delete
-                              </Text>
-                            </TouchableOpacity>
-                          </View>
-                        </View>
-                      )}
-                    </View>
-                  ))}
-
-                {stamps
-                  .filter((s) => s.page === currentPage)
-                  .map((stamp) => (
-                    <View
-                      key={stamp.id}
-                      style={[
-                        styles.stampOverlay,
-                        {
-                          top: `${stamp.y}%` as any,
-                          left: `${stamp.x}%` as any,
+                      filter: t.canvasFilter as any,
+                    },
+                  ]}
+                  {...(Platform.OS === "web"
+                    ? {
+                        onClick: (e: any) => {
+                          handleCanvasClick(e);
+                          handleSingleTap();
                         },
-                      ]}
-                    >
-                      <Ionicons
-                        name="shield-checkmark"
-                        size={16}
-                        color="#059669"
-                      />
-                      <Text style={styles.stampOverlayTitle}>
-                        {stamp.title}
-                      </Text>
-                      <Text style={styles.stampOverlayTime}>{stamp.time}</Text>
-                    </View>
-                  ))}
+                        onMouseDown: startDrawing,
+                        onMouseMove: drawMove,
+                        onMouseUp: stopDrawing,
+                        onMouseLeave: stopDrawing,
+                      }
+                    : {})}
+                >
+                  {/* Visual PDF Document View: Using react-native-pdf Package */}
+                  {pdfSource.uri ? (
+                    <Pdf
+                      ref={canvasRef as any}
+                      source={pdfSource}
+                      scale={zoom}
+                      fitPolicy={0}
+                      enablePaging={viewMode === "single"}
+                      enableAntialiasing={true}
+                      spacing={10}
+                      horizontal={readingDirection === "horizontal"}
+                      onPageSingleTap={handleSingleTap}
+                      onScaleChanged={(scale) => {
+                        setZoom(scale);
+                        triggerPageInteraction();
+                      }}
+                      onLoadComplete={(loadedPages) => {
+                        setNumPages(loadedPages);
+                        setIsLoading(false);
+                        triggerPageInteraction();
+                      }}
+                      onPageChanged={(page, total) => {
+                        setCurrentPage((prev) => (prev !== page ? page : prev));
+                        setNumPages((prev) => (prev !== total ? total : prev));
+                        triggerPageInteraction();
+                      }}
+                      onError={(err) => {
+                        console.warn("react-native-pdf view note:", err);
+                      }}
+                      style={styles.pdfViewer}
+                    />
+                  ) : (
+                    <ActivityIndicator size="small" color="#7bd0ff" />
+                  )}
+
+                  {/* Freehand Drawing Overlay Canvas */}
+                  {Platform.OS === "web" && (
+                    <canvas
+                      ref={drawCanvasRef}
+                      style={{
+                        position: "absolute",
+                        top: 0,
+                        left: 0,
+                        width: "100%",
+                        height: "100%",
+                        pointerEvents:
+                          activeTool === "pen" || activeTool === "highlighter"
+                            ? "auto"
+                            : "none",
+                        maxWidth: "100%",
+                      }}
+                    />
+                  )}
+
+                  {/* Notes and Stamps Overlays */}
+                  {notes
+                    .filter((n) => n.page === currentPage)
+                    .map((note) => (
+                      <View
+                        key={note.id}
+                        style={[
+                          styles.notePin,
+                          {
+                            top: `${note.y}%` as any,
+                            left: `${note.x}%` as any,
+                          },
+                        ]}
+                      >
+                        <TouchableOpacity
+                          onPress={() => setActiveNoteEditing(note.id)}
+                          style={styles.notePinIcon}
+                        >
+                          <Ionicons
+                            name="chatbubble"
+                            size={20}
+                            color="#f59e0b"
+                          />
+                        </TouchableOpacity>
+                        {activeNoteEditing === note.id && (
+                          <View style={styles.noteEditorCard}>
+                            <TextInput
+                              value={newNoteInput}
+                              onChangeText={setNewNoteInput}
+                              style={styles.noteEditorInput}
+                              multiline
+                            />
+                            <View style={styles.noteEditorActions}>
+                              <TouchableOpacity
+                                onPress={() => {
+                                  setNotes((prev) =>
+                                    prev.map((n) =>
+                                      n.id === note.id
+                                        ? { ...n, text: newNoteInput }
+                                        : n,
+                                    ),
+                                  );
+                                  setActiveNoteEditing(null);
+                                  onShowToast("Note updated");
+                                }}
+                                style={styles.noteSaveBtn}
+                              >
+                                <Text style={styles.noteSaveBtnText}>Save</Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity
+                                onPress={() => {
+                                  setNotes((prev) =>
+                                    prev.filter((n) => n.id !== note.id),
+                                  );
+                                  setActiveNoteEditing(null);
+                                }}
+                                style={styles.noteDeleteBtn}
+                              >
+                                <Text style={styles.noteDeleteBtnText}>
+                                  Delete
+                                </Text>
+                              </TouchableOpacity>
+                            </View>
+                          </View>
+                        )}
+                      </View>
+                    ))}
+
+                  {stamps
+                    .filter((s) => s.page === currentPage)
+                    .map((stamp) => (
+                      <View
+                        key={stamp.id}
+                        style={[
+                          styles.stampOverlay,
+                          {
+                            top: `${stamp.y}%` as any,
+                            left: `${stamp.x}%` as any,
+                          },
+                        ]}
+                      >
+                        <Ionicons
+                          name="shield-checkmark"
+                          size={16}
+                          color="#059669"
+                        />
+                        <Text style={styles.stampOverlayTitle}>
+                          {stamp.title}
+                        </Text>
+                        <Text style={styles.stampOverlayTime}>
+                          {stamp.time}
+                        </Text>
+                      </View>
+                    ))}
+                </View>
               </View>
             </View>
-          </View>
-        )}
+          )}
 
         {/* 3. CONTINUOUS SCROLL VIEW (WEB ONLY) */}
         {!isLoading &&
@@ -1328,7 +1303,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
           ))}
 
         {/* Real Dynamic Thumbnail Strip */}
-        {showThumbnails && !isLoading && !loadError && (
+        {/* {showThumbnails && !isLoading && !loadError && (
           <View style={styles.thumbnailStrip}>
             <View style={styles.thumbStripHeader}>
               <Text style={styles.thumbStripTitle}>
@@ -1384,7 +1359,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
               )}
             </ScrollView>
           </View>
-        )}
+        )} */}
       </ScrollView>
 
       {/* Top Header: Absolutely positioned overlay (ZERO layout shift / zero blinks on toggle) */}
@@ -1477,8 +1452,12 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
           {
             opacity: pillOpacity,
             top: !showBars
-              ? (Platform.OS === "ios" ? 52 : 20)
-              : (Platform.OS === "ios" ? 104 : 74),
+              ? Platform.OS === "ios"
+                ? 52
+                : 20
+              : Platform.OS === "ios"
+                ? 104
+                : 74,
           },
         ]}
         pointerEvents="box-none"
@@ -1492,12 +1471,6 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
           style={styles.topLeftPagePill}
           accessibilityLabel={`Page ${currentPage} of ${numPages || 1}`}
         >
-          <Ionicons
-            name="document-text"
-            size={13}
-            color="#7bd0ff"
-            style={{ marginRight: 6 }}
-          />
           <Text style={styles.topLeftPagePillText}>
             {currentPage}
             <Text style={styles.topLeftPagePillTotal}> / {numPages || 1}</Text>
