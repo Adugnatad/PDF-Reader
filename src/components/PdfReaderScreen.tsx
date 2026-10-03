@@ -16,6 +16,7 @@ import {
   Platform,
   Image,
   Dimensions,
+  StatusBar,
 } from "react-native";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { Header } from "./Header";
@@ -97,6 +98,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
   const [showThumbnails, setShowThumbnails] = useState<boolean>(false);
   const [isBookmarked, setIsBookmarked] = useState<boolean>(false);
   const [showPagePicker, setShowPagePicker] = useState<boolean>(false);
+  const [showBars, setShowBars] = useState<boolean>(true);
 
   // Search State
   const [searchOpen, setSearchOpen] = useState<boolean>(false);
@@ -115,6 +117,23 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
     null,
   );
   const [newNoteInput, setNewNoteInput] = useState<string>("");
+
+  // Tap-on-file full screen toggle callback
+  const handleSingleTap = useCallback(() => {
+    // Do not toggle bars if actively drawing with pen or highlighter
+    if (activeTool === "pen" || activeTool === "highlighter") return;
+    if (activeNoteEditing) {
+      setActiveNoteEditing(null);
+      return;
+    }
+    setShowBars((prev) => {
+      const next = !prev;
+      if (!next) {
+        onShowToast("Full screen view (tap to show menu)");
+      }
+      return next;
+    });
+  }, [activeTool, activeNoteEditing, onShowToast]);
 
   // Thumbnails Data Cache (data URLs)
   const [thumbnails, setThumbnails] = useState<Record<number, string>>({});
@@ -691,21 +710,35 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
 
   return (
     <View style={styles.container}>
-      {/* Top Header */}
-      <Header
-        title={activeTitle}
-        onBack={onBack}
-        onShowToast={onShowToast}
-        onOpenFileFromDevice={handlePickAnotherPdf}
-        onOpenSystemViewer={handleOpenSystemViewer}
+      <StatusBar
+        hidden={!showBars}
+        showHideTransition="fade"
+        barStyle="light-content"
+        translucent
       />
+
+      {/* Top Header (disappears in full screen view on single tap) */}
+      {showBars && (
+        <Header
+          title={activeTitle}
+          onBack={onBack}
+          onShowToast={onShowToast}
+          onOpenFileFromDevice={handlePickAnotherPdf}
+          onOpenSystemViewer={handleOpenSystemViewer}
+        />
+      )}
 
       {/* Main Document Content */}
       <ScrollView
-        style={[styles.mainScrollView, { backgroundColor: t.paperBg }]}
+        style={[
+          styles.mainScrollView,
+          { backgroundColor: t.paperBg },
+          !showBars && styles.mainScrollViewFullScreen,
+        ]}
         contentContainerStyle={[
           styles.mainScrollContent,
           !reflow && styles.mainScrollContentPdf,
+          !showBars && styles.mainScrollContentFullScreen,
         ]}
         scrollEnabled={
           reflow || (Platform.OS === "web" && viewMode === "continuous")
@@ -879,7 +912,10 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                 ]}
                 {...(Platform.OS === "web"
                   ? {
-                      onClick: handleCanvasClick,
+                      onClick: (e: any) => {
+                        handleCanvasClick(e);
+                        handleSingleTap();
+                      },
                       onMouseDown: startDrawing,
                       onMouseMove: drawMove,
                       onMouseUp: stopDrawing,
@@ -898,6 +934,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                     enableAntialiasing={true}
                     spacing={10}
                     horizontal={readingDirection === "horizontal"}
+                    onPageSingleTap={handleSingleTap}
                     onLoadComplete={(loadedPages) => {
                       setNumPages(loadedPages);
                       setIsLoading(false);
@@ -909,7 +946,10 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                     onError={(err) => {
                       console.warn("react-native-pdf view note:", err);
                     }}
-                    style={styles.pdfViewer}
+                    style={[
+                      styles.pdfViewer,
+                      !showBars && styles.pdfViewerFullScreen,
+                    ]}
                   />
                 ) : (
                   <ActivityIndicator size="small" color="#7bd0ff" />
@@ -1223,109 +1263,94 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
         )}
       </ScrollView>
 
-      {/* Docked Sticky Bottom Bar containing the prominent VIEW MODE button */}
-      <View style={styles.dockedBottomBar}>
-        <View style={styles.bottomBarInner}>
-          {/* Page Navigation Controls */}
-          {/* <View style={styles.dockPageNavGroup}>
+      {/* Docked Sticky Bottom Bar (disappears in full screen view on single tap) */}
+      {showBars && (
+        <View style={styles.dockedBottomBar}>
+          <View style={styles.bottomBarInner}>
+            {/* PROMINENT VIEW MODE BUTTON AT BOTTOM */}
             <TouchableOpacity
-              onPress={handlePrevPage}
-              disabled={currentPage <= 1 || viewMode === "continuous"}
-              style={[
-                styles.dockNavBtn,
-                (currentPage <= 1 || viewMode === "continuous") &&
-                  styles.dockBtnDisabled,
-              ]}
-              accessibilityLabel="Previous Page"
+              style={styles.viewModeBottomInner}
+              onPress={() => setShowViewModeModal(true)}
+              activeOpacity={0.7}
+              accessibilityLabel="View Mode"
+              accessibilityRole="button"
             >
-              <Ionicons
-                name={
-                  readingDirection === "horizontal"
-                    ? "chevron-back"
-                    : "arrow-back"
-                }
-                size={18}
-                color={
-                  currentPage <= 1 || viewMode === "continuous"
-                    ? "#4b5563"
-                    : "#dae2fd"
-                }
-              />
+              <MaterialIcons name="book" size={23} color="#fff" />
+              <Text style={styles.viewModeBtnTitle}>View Mode</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.viewModeBottomInner}
+              onPress={() => {
+                onShowToast("Edit & annotation tools enabled");
+              }}
+              activeOpacity={0.7}
+              accessibilityLabel="Edit"
+              accessibilityRole="button"
+            >
+              <MaterialIcons name="edit" size={23} color="#fff" />
+              <Text style={styles.viewModeBtnTitle}>Edit</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.viewModeBottomInner}
+              onPress={() => setShowViewModeModal(true)}
+              activeOpacity={0.7}
+              accessibilityLabel="Settings"
+              accessibilityRole="button"
+            >
+              <MaterialIcons name="settings" size={23} color="#fff" />
+              <Text style={styles.viewModeBtnTitle}>Settings</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      {/* Full-Screen Floating Overlays (appear when header and bottom bar are hidden) */}
+      {!showBars && (
+        <>
+          {/* Subtle floating back and title pill */}
+          <View style={styles.floatingTopBar} pointerEvents="box-none">
+            <TouchableOpacity
+              onPress={onBack}
+              style={styles.floatingBackBtn}
+              accessibilityLabel="Exit reader"
+              activeOpacity={0.7}
+            >
+              <Ionicons name="arrow-back" size={20} color="#ffffff" />
             </TouchableOpacity>
 
             <TouchableOpacity
-              onPress={() => setShowPagePicker(!showPagePicker)}
-              style={styles.dockPagePill}
-              accessibilityLabel="Select Page"
+              onPress={handleSingleTap}
+              style={styles.floatingTitlePill}
+              accessibilityLabel="Tap to show menu and controls"
+              activeOpacity={0.7}
             >
-              <Text style={styles.dockPagePillText}>
-                {currentPage}
-                <Text style={styles.dockPageTotalText}> / {numPages || 1}</Text>
+              <Text style={styles.floatingTitleText} numberOfLines={1}>
+                {activeTitle}
               </Text>
             </TouchableOpacity>
+          </View>
 
+          {/* Subtle floating page indicator pill */}
+          <View style={styles.floatingBottomBar} pointerEvents="box-none">
             <TouchableOpacity
-              onPress={handleNextPage}
-              disabled={currentPage >= numPages || viewMode === "continuous"}
-              style={[
-                styles.dockNavBtn,
-                (currentPage >= numPages || viewMode === "continuous") &&
-                  styles.dockBtnDisabled,
-              ]}
-              accessibilityLabel="Next Page"
+              onPress={handleSingleTap}
+              style={styles.floatingPagePill}
+              accessibilityLabel="Tap to show menu and controls"
+              activeOpacity={0.7}
             >
+              <Text style={styles.floatingPageText}>
+                {currentPage} / {numPages || 1}
+              </Text>
               <Ionicons
-                name={
-                  readingDirection === "horizontal"
-                    ? "chevron-forward"
-                    : "arrow-forward"
-                }
-                size={18}
-                color={
-                  currentPage >= numPages || viewMode === "continuous"
-                    ? "#4b5563"
-                    : "#dae2fd"
-                }
+                name="chevron-up"
+                size={14}
+                color="#7bd0ff"
+                style={{ marginLeft: 4 }}
               />
             </TouchableOpacity>
-          </View> */}
-
-          {/* PROMINENT VIEW MODE BUTTON AT BOTTOM */}
-
-          <TouchableOpacity
-            style={styles.viewModeBottomInner}
-            onPress={() => setShowViewModeModal(true)}
-            activeOpacity={0.7}
-            accessibilityLabel="View Mode"
-            accessibilityRole="button"
-          >
-            <MaterialIcons name="book" size={23} color="#fff" />
-            <Text style={styles.viewModeBtnTitle}>View Mode</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.viewModeBottomInner}
-            onPress={() => {
-              onShowToast("Edit & annotation tools enabled");
-            }}
-            activeOpacity={0.7}
-            accessibilityLabel="Edit"
-            accessibilityRole="button"
-          >
-            <MaterialIcons name="edit" size={23} color="#fff" />
-            <Text style={styles.viewModeBtnTitle}>Edit</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.viewModeBottomInner}
-            onPress={() => setShowViewModeModal(true)}
-            activeOpacity={0.7}
-            accessibilityLabel="Settings"
-            accessibilityRole="button"
-          >
-            <MaterialIcons name="settings" size={23} color="#fff" />
-            <Text style={styles.viewModeBtnTitle}>Settings</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
+          </View>
+        </>
+      )}
 
       {/* View Mode Modal Component */}
       <ViewModeModal
@@ -2275,5 +2300,91 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight:
       Platform.OS !== "web" ? Dimensions.get("window").height - 140 : undefined,
+  },
+  pdfViewerFullScreen: {
+    minHeight: Dimensions.get("window").height,
+    height: "100%",
+  },
+  mainScrollViewFullScreen: {
+    paddingTop: 0,
+  },
+  mainScrollContentFullScreen: {
+    padding: 0,
+    paddingTop: 0,
+    paddingBottom: 0,
+  },
+  floatingTopBar: {
+    position: "absolute",
+    top: Platform.OS === "ios" ? 52 : 20,
+    left: 16,
+    right: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    zIndex: 100,
+  },
+  floatingBackBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(11, 19, 38, 0.8)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.15)",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+    elevation: 6,
+  },
+  floatingTitlePill: {
+    maxWidth: "75%",
+    backgroundColor: "rgba(11, 19, 38, 0.8)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.15)",
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+    elevation: 6,
+  },
+  floatingTitleText: {
+    color: "#dae2fd",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  floatingBottomBar: {
+    position: "absolute",
+    bottom: Platform.OS === "ios" ? 36 : 24,
+    left: 0,
+    right: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 100,
+  },
+  floatingPagePill: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(11, 19, 38, 0.85)",
+    borderWidth: 1,
+    borderColor: "rgba(123, 208, 255, 0.35)",
+    borderRadius: 22,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+    elevation: 6,
+  },
+  floatingPageText: {
+    color: "#7bd0ff",
+    fontSize: 12,
+    fontWeight: "700",
+    letterSpacing: 0.5,
   },
 });

@@ -70,6 +70,7 @@ const Pdf = forwardRef<any, PdfProps>((props, forwardedRef) => {
     onLoadComplete,
     onPageChanged,
     onError,
+    onPageSingleTap,
     renderActivityIndicator,
   } = props;
 
@@ -243,11 +244,20 @@ const Pdf = forwardRef<any, PdfProps>((props, forwardedRef) => {
       )}
       <canvas
         ref={localCanvasRef}
+        onClick={(e) => {
+          if (onPageSingleTap) {
+            const rect = (e.currentTarget as HTMLCanvasElement).getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            onPageSingleTap(activePage, x, y);
+          }
+        }}
         style={{
           display: loading ? 'none' : 'block',
           width: '100%',
           height: 'auto',
           maxWidth: '100%',
+          cursor: 'pointer',
         }}
       />
     </View>
