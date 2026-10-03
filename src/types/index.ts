@@ -31,6 +31,14 @@ export interface SheetRow {
 
 export type ReaderTheme = 'light' | 'sepia' | 'night';
 
+export interface ViewModeSettings {
+  viewMode: 'single' | 'continuous';
+  reflow: boolean;
+  reflowFontSize: number;
+  theme: ReaderTheme;
+  readingDirection: 'horizontal' | 'vertical';
+}
+
 export interface Annotation {
   id: string;
   title: string;

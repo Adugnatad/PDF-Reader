@@ -31,6 +31,10 @@ import {
   getPdfLocalUri,
   openInNativeSystemViewer,
 } from "../services/nativePdfOpener";
+import {
+  saveViewModeSettings,
+  loadViewModeSettings,
+} from "../services/storageHelper";
 
 interface PdfReaderScreenProps {
   onBack: () => void;
@@ -92,6 +96,100 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
   const [readingDirection, setReadingDirection] = useState<
     "horizontal" | "vertical"
   >("vertical");
+
+  // Load remembered View Mode settings on mount
+  useEffect(() => {
+    let isMounted = true;
+    (async () => {
+      try {
+        const saved = await loadViewModeSettings();
+        if (saved && isMounted) {
+          if (saved.viewMode) setViewMode(saved.viewMode);
+          if (typeof saved.reflow === "boolean") setReflow(saved.reflow);
+          if (saved.reflowFontSize) setReflowFontSize(saved.reflowFontSize);
+          if (saved.theme) setTheme(saved.theme);
+          if (saved.readingDirection) setReadingDirection(saved.readingDirection);
+        }
+      } catch (err) {
+        console.warn("Could not load view mode settings:", err);
+      }
+    })();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Handlers to update and immediately persist View Mode choices
+  const handleUpdateViewMode = useCallback(
+    (mode: "single" | "continuous") => {
+      setViewMode(mode);
+      saveViewModeSettings({
+        viewMode: mode,
+        reflow,
+        reflowFontSize,
+        theme,
+        readingDirection,
+      });
+    },
+    [reflow, reflowFontSize, theme, readingDirection]
+  );
+
+  const handleUpdateReflow = useCallback(
+    (active: boolean) => {
+      setReflow(active);
+      saveViewModeSettings({
+        viewMode,
+        reflow: active,
+        reflowFontSize,
+        theme,
+        readingDirection,
+      });
+    },
+    [viewMode, reflowFontSize, theme, readingDirection]
+  );
+
+  const handleUpdateFontSize = useCallback(
+    (size: number) => {
+      setReflowFontSize(size);
+      saveViewModeSettings({
+        viewMode,
+        reflow,
+        reflowFontSize: size,
+        theme,
+        readingDirection,
+      });
+    },
+    [viewMode, reflow, theme, readingDirection]
+  );
+
+  const handleUpdateTheme = useCallback(
+    (newTheme: ReaderTheme) => {
+      setTheme(newTheme);
+      saveViewModeSettings({
+        viewMode,
+        reflow,
+        reflowFontSize,
+        theme: newTheme,
+        readingDirection,
+      });
+    },
+    [viewMode, reflow, reflowFontSize, readingDirection]
+  );
+
+  const handleUpdateReadingDirection = useCallback(
+    (dir: "horizontal" | "vertical") => {
+      setReadingDirection(dir);
+      saveViewModeSettings({
+        viewMode,
+        reflow,
+        reflowFontSize,
+        theme,
+        readingDirection: dir,
+      });
+    },
+    [viewMode, reflow, reflowFontSize, theme]
+  );
+
   const [showViewModeModal, setShowViewModeModal] = useState<boolean>(false);
   const [zoom, setZoom] = useState<number>(1.0);
   const [rotation, setRotation] = useState<number>(0);
@@ -794,7 +892,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
               </View>
               <View style={styles.reflowControls}>
                 <TouchableOpacity
-                  onPress={() => setReflowFontSize((f) => Math.max(12, f - 2))}
+                  onPress={() => handleUpdateFontSize(Math.max(12, reflowFontSize - 2))}
                   style={styles.reflowBtn}
                   accessibilityLabel="Decrease Font Size"
                 >
@@ -808,7 +906,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                 </View>
 
                 <TouchableOpacity
-                  onPress={() => setReflowFontSize((f) => Math.min(32, f + 2))}
+                  onPress={() => handleUpdateFontSize(Math.min(32, reflowFontSize + 2))}
                   style={styles.reflowBtn}
                   accessibilityLabel="Increase Font Size"
                 >
@@ -1357,15 +1455,15 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
         visible={showViewModeModal}
         onClose={() => setShowViewModeModal(false)}
         viewMode={viewMode}
-        onChangeViewMode={(mode) => setViewMode(mode)}
+        onChangeViewMode={handleUpdateViewMode}
         reflow={reflow}
-        onToggleReflow={(val) => setReflow(val)}
+        onToggleReflow={handleUpdateReflow}
         reflowFontSize={reflowFontSize}
-        onChangeFontSize={(sz) => setReflowFontSize(sz)}
+        onChangeFontSize={handleUpdateFontSize}
         theme={theme}
-        onChangeTheme={(th) => setTheme(th)}
+        onChangeTheme={handleUpdateTheme}
         readingDirection={readingDirection}
-        onChangeReadingDirection={(dir) => setReadingDirection(dir)}
+        onChangeReadingDirection={handleUpdateReadingDirection}
         onShowToast={onShowToast}
       />
     </View>
