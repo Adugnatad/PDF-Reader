@@ -11,16 +11,8 @@ export default function IndexScreen() {
   const [allFiles, setAllFiles] = useState<DocFile[]>(() => pdfStore.getUserFiles());
 
   useEffect(() => {
-    // 1. Subscribe to store changes immediately
     const unsubscribe = pdfStore.subscribe(() => {
       setAllFiles(pdfStore.getUserFiles());
-    });
-
-    // 2. Automatically scan native device storage for PDF documents on launch
-    pdfStore.scanDeviceAutomatically().then((found) => {
-      setAllFiles([...found]);
-    }).catch((err) => {
-      console.warn('Auto device scan error:', err);
     });
 
     return unsubscribe;

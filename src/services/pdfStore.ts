@@ -9,6 +9,7 @@ import {
   autoScanDevicePdfs,
   readNativePdfBytes,
   DiscoveredPdfItem,
+  hasAllFilesAccess,
 } from './nativeFilePicker';
 import {
   isUuidOrHash,
@@ -35,16 +36,17 @@ class PdfStoreService {
   private nativeUriMap: Map<string, string> = new Map();
   private listeners: Set<() => void> = new Set();
   private scanPromise: Promise<DocFile[]> | null = null;
-  private isLoaded: boolean = false;
+  private initialDeviceScanPromise: Promise<DocFile[]> | null = null;
+  private initialDeviceScanComplete = false;
+  private storageSavePromise: Promise<void> = Promise.resolve();
+  private initPromise: Promise<void>;
 
   constructor() {
-    this.initStore();
+    this.initPromise = this.initStore();
   }
 
   private async initStore() {
     await this.loadFromStorage();
-    this.isLoaded = true;
-    this.scanDeviceAutomatically().catch(() => {});
   }
 
   public subscribe(listener: () => void): () => void {
@@ -56,7 +58,7 @@ class PdfStoreService {
     this.listeners.forEach((l) => l());
   }
 
-  private async saveToStorage() {
+  private saveToStorage(): Promise<void> {
     try {
       const uriMapObj: Record<string, string> = {};
       this.nativeUriMap.forEach((val, key) => {
@@ -66,11 +68,18 @@ class PdfStoreService {
       const payload = JSON.stringify({
         files: this.userFiles,
         uriMap: uriMapObj,
+        initialDeviceScanComplete: this.initialDeviceScanComplete,
       });
 
-      await saveRegistryToDisk(payload);
+      this.storageSavePromise = this.storageSavePromise
+        .then(() => saveRegistryToDisk(payload))
+        .catch((e) => {
+          console.warn('Save registry error:', e);
+        });
+      return this.storageSavePromise;
     } catch (e) {
       console.warn('Save registry error:', e);
+      return Promise.resolve();
     }
   }
 
@@ -103,6 +112,8 @@ class PdfStoreService {
             }
           }
         }
+        this.initialDeviceScanComplete =
+          parsed.initialDeviceScanComplete === true;
         this.notify();
       }
     } catch (e) {
@@ -264,6 +275,7 @@ class PdfStoreService {
    * Automatically scans device storage for PDFs.
    */
   public async scanDeviceAutomatically(): Promise<DocFile[]> {
+    await this.initPromise;
     if (this.scanPromise) {
       return this.scanPromise;
     }
@@ -283,6 +295,35 @@ class PdfStoreService {
     })();
 
     return this.scanPromise;
+  }
+
+  /**
+   * Runs the initial automatic scan once, after Android all-files access is granted.
+   */
+  public async scanDeviceOnceAfterPermission(): Promise<DocFile[]> {
+    await this.initPromise;
+
+    if (this.initialDeviceScanComplete) {
+      return [...this.userFiles];
+    }
+    if (this.initialDeviceScanPromise) {
+      return this.initialDeviceScanPromise;
+    }
+
+    this.initialDeviceScanPromise = (async () => {
+      if (!(await hasAllFilesAccess())) {
+        return [...this.userFiles];
+      }
+
+      const files = await this.scanDeviceAutomatically();
+      this.initialDeviceScanComplete = true;
+      await this.saveToStorage();
+      return files;
+    })().finally(() => {
+      this.initialDeviceScanPromise = null;
+    });
+
+    return this.initialDeviceScanPromise;
   }
 
   public getNativeUri(idOrTitle: string): string | undefined {

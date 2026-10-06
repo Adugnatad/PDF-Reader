@@ -12,7 +12,6 @@ import {
   Modal,
 } from "react-native";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
-import { useFocusEffect } from "expo-router";
 import { DocFile } from "../types";
 import { pdfStore } from "../services/pdfStore";
 import {
@@ -52,28 +51,31 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
     setDeviceFiles(files);
   }, [files]);
 
-  // Subscribe to pdfStore updates and automatically scan device on mount
+  // Subscribe to updates; restore files from the persisted registry without rescanning.
   React.useEffect(() => {
     const unsub = pdfStore.subscribe(() => {
       setDeviceFiles(pdfStore.getAllFiles());
     });
-
-    setIsScanning(true);
-    pdfStore
-      .scanDeviceAutomatically()
-      .then(() => {
-        setDeviceFiles(pdfStore.getAllFiles());
-      })
-      .catch(() => {})
-      .finally(() => {
-        setIsScanning(false);
-      });
 
     return unsub;
   }, []);
 
   React.useEffect(() => {
     if (Platform.OS !== "android" || Number(Platform.Version) < 30) return;
+
+    const scanOnceIfAccessGranted = async () => {
+      if (!(await hasAllFilesAccess())) return;
+
+      setIsScanning(true);
+      try {
+        await pdfStore.scanDeviceOnceAfterPermission();
+        setDeviceFiles(pdfStore.getAllFiles());
+      } catch (error) {
+        console.warn("Could not perform initial device scan:", error);
+      } finally {
+        setIsScanning(false);
+      }
+    };
 
     const requestAccessOnLaunch = async () => {
       if (accessSettingsOpenedRef.current || (await hasAllFilesAccess()))
@@ -99,6 +101,9 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
       );
     };
 
+    scanOnceIfAccessGranted().catch((error) => {
+      console.warn("Could not check file access:", error);
+    });
     requestAccessOnLaunch().catch((error) => {
       console.warn("Could not open all-files access settings:", error);
     });
@@ -107,24 +112,20 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
   React.useEffect(() => {
     if (Platform.OS !== "android") return;
     const subscription = AppState.addEventListener("change", async (state) => {
-      if (state !== "active" || !(await hasAllFilesAccess())) return;
-      await pdfStore.scanDeviceAutomatically();
-      setDeviceFiles(pdfStore.getAllFiles());
+      if (state !== "active" || Number(Platform.Version) < 30) return;
+      try {
+        if (!(await hasAllFilesAccess())) return;
+        setIsScanning(true);
+        await pdfStore.scanDeviceOnceAfterPermission();
+        setDeviceFiles(pdfStore.getAllFiles());
+      } catch (error) {
+        console.warn("Could not scan after file access was granted:", error);
+      } finally {
+        setIsScanning(false);
+      }
     });
     return () => subscription.remove();
   }, []);
-
-  // Re-check for new PDF files whenever home screen gains focus
-  useFocusEffect(
-    React.useCallback(() => {
-      pdfStore
-        .scanDeviceAutomatically()
-        .then(() => {
-          setDeviceFiles(pdfStore.getAllFiles());
-        })
-        .catch(() => {});
-    }, []),
-  );
 
   // Load PDF file from device (iOS / Android / Web)
   const handleOpenDeviceFile = async () => {
