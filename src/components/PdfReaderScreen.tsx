@@ -226,10 +226,36 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
     }, 2500);
   }, [pillOpacity]);
 
+  // Debounced zoom/scale handler: prevents 60 FPS React re-renders and bridge storms during native pinch
+  const debouncedScaleTimer = useRef<any>(null);
+  const handleScaleChanged = useCallback(
+    (newScale: number) => {
+      if (Platform.OS === "web") {
+        setZoom(newScale);
+        triggerPageInteraction();
+        return;
+      }
+
+      // On Native: let the native Android/iOS pinch zoom gesture run at 60 FPS on the UI thread!
+      // Only commit the final scale value to React state once the pinch settles.
+      if (debouncedScaleTimer.current) {
+        clearTimeout(debouncedScaleTimer.current);
+      }
+      debouncedScaleTimer.current = setTimeout(() => {
+        setZoom(+(newScale.toFixed(2)));
+        triggerPageInteraction();
+      }, 250);
+    },
+    [triggerPageInteraction],
+  );
+
   useEffect(() => {
     return () => {
       if (pillTimerRef.current) {
         clearTimeout(pillTimerRef.current);
+      }
+      if (debouncedScaleTimer.current) {
+        clearTimeout(debouncedScaleTimer.current);
       }
     };
   }, []);
@@ -861,20 +887,33 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
         backgroundColor="transparent"
       />
 
-      {/* Main Document Content (Fixed layout that never resizes or causes page refresh/blink) */}
-      <ScrollView
-        style={[styles.mainScrollView, { backgroundColor: t.paperBg }]}
-        contentContainerStyle={[
-          styles.mainScrollContent,
-          !reflow && styles.mainScrollContentPdf,
-        ]}
-        scrollEnabled={
-          reflow || (Platform.OS === "web" && viewMode === "continuous")
-        }
-        onScroll={triggerPageInteraction}
-        scrollEventThrottle={16}
-      >
-        {/* Loading State */}
+      {/* Main Document Content (Non-scrollable View on native PDF to avoid gesture conflicts and crashes) */}
+      {(() => {
+        const MainBody = Platform.OS !== "web" && !reflow ? View : ScrollView;
+        const bodyProps =
+          Platform.OS !== "web" && !reflow
+            ? {
+                style: [
+                  styles.mainScrollView,
+                  { backgroundColor: t.paperBg, flex: 1 },
+                ],
+              }
+            : {
+                style: [styles.mainScrollView, { backgroundColor: t.paperBg }],
+                contentContainerStyle: [
+                  styles.mainScrollContent,
+                  !reflow && styles.mainScrollContentPdf,
+                ],
+                scrollEnabled:
+                  reflow ||
+                  (Platform.OS === "web" && viewMode === "continuous"),
+                onScroll: triggerPageInteraction,
+                scrollEventThrottle: 16,
+              };
+
+        return (
+          <MainBody {...(bodyProps as any)}>
+            {/* Loading State */}
         {isLoading && (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color="#7bd0ff" />
@@ -992,7 +1031,10 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                   {
                     backgroundColor: t.paperBg,
                     borderColor: "transparent",
-                    width: zoom > 1 ? `${Math.round(zoom * 100)}%` : "100%",
+                    width:
+                      Platform.OS === "web" && zoom > 1
+                        ? `${Math.round(zoom * 100)}%`
+                        : "100%",
                   },
                 ]}
               >
@@ -1024,16 +1066,16 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                       ref={canvasRef as any}
                       source={pdfSource}
                       scale={zoom}
+                      minScale={0.5}
+                      maxScale={4.0}
                       fitPolicy={0}
-                      enablePaging={viewMode === "single"}
+                      enablePaging={viewMode === "single" && zoom <= 1.05}
                       enableAntialiasing={true}
+                      enableDoubleTapZoom={true}
                       spacing={10}
                       horizontal={readingDirection === "horizontal"}
                       onPageSingleTap={handleSingleTap}
-                      onScaleChanged={(scale) => {
-                        setZoom(scale);
-                        triggerPageInteraction();
-                      }}
+                      onScaleChanged={handleScaleChanged}
                       onLoadComplete={(loadedPages) => {
                         setNumPages(loadedPages);
                         setIsLoading(false);
@@ -1371,7 +1413,9 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
             </ScrollView>
           </View>
         )} */}
-      </ScrollView>
+          </MainBody>
+        );
+      })()}
 
       {/* Top Header: Absolutely positioned overlay (ZERO layout shift / zero blinks on toggle) */}
       <Animated.View
