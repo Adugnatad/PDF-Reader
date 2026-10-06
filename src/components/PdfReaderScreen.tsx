@@ -318,14 +318,22 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
 
         // On Web, initialize pdfjsLib for search, reflow, and continuous view
         if (Platform.OS === "web") {
+          const bufferCopy =
+            item.data instanceof Uint8Array
+              ? item.data.slice()
+              : new Uint8Array(item.data).slice();
+
           const loadingTask = pdfjsLib.getDocument({
-            data: item.data,
+            data: bufferCopy,
           });
 
           const loadedDoc = await loadingTask.promise;
           if (isCancelled) return;
           setPdfDoc(loadedDoc);
           setNumPages(loadedDoc.numPages);
+          if (docId && loadedDoc.numPages > 0) {
+            pdfStore.updatePageCount(docId, loadedDoc.numPages);
+          }
           setCurrentPage(1);
           setIsLoading(false);
         } else {
@@ -1030,6 +1038,9 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                         setNumPages(loadedPages);
                         setIsLoading(false);
                         triggerPageInteraction();
+                        if (docId && loadedPages > 0) {
+                          pdfStore.updatePageCount(docId, loadedPages);
+                        }
                       }}
                       onPageChanged={(page, total) => {
                         setCurrentPage((prev) => (prev !== page ? page : prev));

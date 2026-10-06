@@ -112,9 +112,18 @@ const Pdf = forwardRef<any, PdfProps>((props, forwardedRef) => {
           pdfData = fastBase64ToUint8(b64);
         }
 
-        const task = pdfjsLib.getDocument(
-          typeof pdfData === 'string' ? { url: pdfData } : { data: pdfData }
-        );
+        let taskInput: any;
+        if (typeof pdfData === 'string') {
+          taskInput = { url: pdfData };
+        } else if (pdfData instanceof Uint8Array) {
+          taskInput = { data: pdfData.slice() };
+        } else if (pdfData instanceof ArrayBuffer) {
+          taskInput = { data: pdfData.slice(0) };
+        } else {
+          taskInput = { data: pdfData };
+        }
+
+        const task = pdfjsLib.getDocument(taskInput);
         const loadedDoc = await task.promise;
         if (isCancelled) return;
 

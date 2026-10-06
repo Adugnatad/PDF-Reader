@@ -8,6 +8,7 @@ import {
   registerKnownPdfName,
   getKnownPdfName,
   extractPdfInfoFromBytes,
+  extractPdfInfoFromBytesAsync,
   isJunkDocument,
 } from "../utils/pdfNameResolver";
 
@@ -136,6 +137,17 @@ async function scanSafDirectory(
 
       registerKnownPdfName(fileUri, realName);
 
+      let pageCount = 1;
+      try {
+        const bytes = await readNativePdfBytes(fileUri);
+        if (bytes) {
+          const info = await extractPdfInfoFromBytesAsync(bytes);
+          if (info.pageCount && info.pageCount > 0) {
+            pageCount = info.pageCount;
+          }
+        }
+      } catch {}
+
       discovered.push({
         id: `saf-${fileUri}`,
         name: realName,
@@ -143,7 +155,7 @@ async function scanSafDirectory(
         uri: fileUri,
         lastModified,
         folder: "Documents",
-        pageCount: 1,
+        pageCount,
       });
     }
   } catch (err) {
@@ -309,6 +321,17 @@ async function scanDirectoryRecursive(
 
           registerKnownPdfName(fileUri, realName);
 
+          let pageCount = 1;
+          try {
+            const bytes = await readNativePdfBytes(fileUri);
+            if (bytes) {
+              const info = await extractPdfInfoFromBytesAsync(bytes);
+              if (info.pageCount && info.pageCount > 0) {
+                pageCount = info.pageCount;
+              }
+            }
+          } catch {}
+
           discovered.push({
             id: `native-${fullPath}`,
             name: realName,
@@ -316,7 +339,7 @@ async function scanDirectoryRecursive(
             uri: fileUri,
             lastModified,
             folder,
-            pageCount: 1,
+            pageCount,
           });
         }
       } catch {
@@ -496,6 +519,17 @@ export async function autoScanDevicePdfs(): Promise<DiscoveredPdfItem[]> {
 
             registerKnownPdfName(fileUri, realName);
 
+            let pageCount = 1;
+            try {
+              const bytes = await readNativePdfBytes(fileUri);
+              if (bytes) {
+                const info = await extractPdfInfoFromBytesAsync(bytes);
+                if (info.pageCount && info.pageCount > 0) {
+                  pageCount = info.pageCount;
+                }
+              }
+            } catch {}
+
             discovered.push({
               id: `app-doc-${file}`,
               name: realName,
@@ -503,7 +537,7 @@ export async function autoScanDevicePdfs(): Promise<DiscoveredPdfItem[]> {
               uri: fileUri,
               lastModified,
               folder: "Documents",
-              pageCount: 1,
+              pageCount,
             });
           }
         }
@@ -631,7 +665,7 @@ export async function pickPdfFromDevice(): Promise<PickedFileResult | null> {
 
     let pageCount: number | undefined;
     if (buffer) {
-      const info = extractPdfInfoFromBytes(buffer);
+      const info = await extractPdfInfoFromBytesAsync(buffer);
       pageCount = info.pageCount;
     }
 

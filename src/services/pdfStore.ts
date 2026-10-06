@@ -17,6 +17,7 @@ import {
   registerKnownPdfName,
   getKnownPdfName,
   extractPdfInfoFromBytes,
+  extractPdfInfoFromBytesAsync,
   isJunkDocument,
 } from '../utils/pdfNameResolver';
 import { saveRegistryToDisk, loadRegistryFromDisk } from './storageHelper';
@@ -28,6 +29,21 @@ interface StoredPdf {
   pageCount?: number;
   uploadedAt: string;
   nativeUri?: string;
+}
+
+function isBufferDetached(data: any): boolean {
+  if (!data) return true;
+  if (data.detached === true) return true;
+  if (data.byteLength === 0) return true;
+  if (data.buffer && (data.buffer.detached === true || data.buffer.byteLength === 0)) return true;
+  return false;
+}
+
+function cloneBufferSafe(data: Uint8Array | ArrayBuffer): Uint8Array {
+  const u8 = data instanceof Uint8Array ? data : new Uint8Array(data);
+  const copy = new Uint8Array(u8.byteLength);
+  copy.set(u8);
+  return copy;
 }
 
 class PdfStoreService {
@@ -47,6 +63,7 @@ class PdfStoreService {
 
   private async initStore() {
     await this.loadFromStorage();
+    this.resolveMissingPageCounts().catch(() => {});
   }
 
   public subscribe(listener: () => void): () => void {
@@ -178,13 +195,19 @@ class PdfStoreService {
 
       if (existingIdx >= 0) {
         const existing = cleanFiles[existingIdx];
-        if (existing.name !== realName || existing.size !== sizeStr) {
+        const newPageCount = (item.pageCount && item.pageCount > 0) ? item.pageCount : (existing.pageCount || 1);
+        if (
+          existing.name !== realName ||
+          existing.size !== sizeStr ||
+          existing.pageCount !== newPageCount
+        ) {
           cleanFiles[existingIdx] = {
             ...existing,
             name: realName,
             size: sizeStr,
             modified: modStr,
             source: 'Device Storage',
+            pageCount: newPageCount,
           };
           this.nativeUriMap.set(existing.id, item.uri);
           this.nativeUriMap.set(realName, item.uri);
@@ -286,6 +309,7 @@ class PdfStoreService {
         if (items && items.length > 0) {
           this.registerDiscoveredDevicePdfs(items);
         }
+        this.resolveMissingPageCounts().catch(() => {});
       } catch (err) {
         console.warn('Auto scan device error:', err);
       } finally {
@@ -341,23 +365,29 @@ class PdfStoreService {
     // 1. Check exact id match in cache
     if (this.pdfCache.has(docIdOrTitle)) {
       const item = this.pdfCache.get(docIdOrTitle)!;
-      return {
-        data: item.data,
-        name: item.name,
-        id: item.id,
-        nativeUri: item.nativeUri,
-      };
-    }
-
-    // 2. Check title match in cache
-    for (const [_, item] of this.pdfCache.entries()) {
-      if (item.name.toLowerCase() === docIdOrTitle.toLowerCase()) {
+      if (!isBufferDetached(item.data)) {
         return {
-          data: item.data,
+          data: cloneBufferSafe(item.data),
           name: item.name,
           id: item.id,
           nativeUri: item.nativeUri,
         };
+      }
+      this.pdfCache.delete(docIdOrTitle);
+    }
+
+    // 2. Check title match in cache
+    for (const [key, item] of this.pdfCache.entries()) {
+      if (item.name.toLowerCase() === docIdOrTitle.toLowerCase()) {
+        if (!isBufferDetached(item.data)) {
+          return {
+            data: cloneBufferSafe(item.data),
+            name: item.name,
+            id: item.id,
+            nativeUri: item.nativeUri,
+          };
+        }
+        this.pdfCache.delete(key);
       }
     }
 
@@ -365,19 +395,30 @@ class PdfStoreService {
     const nativeUri = this.nativeUriMap.get(docIdOrTitle);
     if (nativeUri) {
       const bytes = await readNativePdfBytes(nativeUri);
-      if (bytes) {
+      if (bytes && !isBufferDetached(bytes)) {
+        const safeBytes = cloneBufferSafe(bytes);
+        let pageCount: number | undefined;
+        try {
+          const info = await extractPdfInfoFromBytesAsync(safeBytes);
+          if (info.pageCount && info.pageCount > 0) {
+            pageCount = info.pageCount;
+            this.updatePageCount(docIdOrTitle, info.pageCount);
+          }
+        } catch {}
+
         const storedName = docIdOrTitle.split('/').pop() || docIdOrTitle;
         const stored: StoredPdf = {
           id: docIdOrTitle,
           name: storedName,
-          data: bytes,
+          data: cloneBufferSafe(safeBytes),
           uploadedAt: 'Device',
+          pageCount,
           nativeUri,
         };
         this.pdfCache.set(docIdOrTitle, stored);
         this.pdfCache.set(storedName, stored);
         return {
-          data: stored.data,
+          data: cloneBufferSafe(stored.data),
           name: stored.name,
           id: stored.id,
           nativeUri,
@@ -418,13 +459,13 @@ class PdfStoreService {
     const stored: StoredPdf = {
       id: docIdOrTitle,
       name: finalTitle,
-      data: generatedBytes,
+      data: cloneBufferSafe(generatedBytes),
       uploadedAt: 'Today',
       nativeUri,
     };
     this.pdfCache.set(docIdOrTitle, stored);
     return {
-      data: stored.data,
+      data: cloneBufferSafe(stored.data),
       name: stored.name,
       id: stored.id,
       nativeUri,
@@ -465,10 +506,11 @@ class PdfStoreService {
         ? `${sizeInMb} MB`
         : `${Math.max(1, Math.round(file.size / 1024))} KB`;
 
+    const safeBuffer = cloneBufferSafe(buffer);
     const stored: StoredPdf = {
       id,
       name: resolvedName,
-      data: buffer,
+      data: safeBuffer,
       pageCount,
       uploadedAt: 'Just now',
       nativeUri,
@@ -510,6 +552,62 @@ class PdfStoreService {
     pageCount?: number
   ): DocFile {
     return this.addDevicePdf(file, buffer, 'Downloads');
+  }
+
+  public updatePageCount(idOrName: string, pageCount: number): boolean {
+    if (!idOrName || !pageCount || pageCount < 1) return false;
+    let changed = false;
+
+    for (let i = 0; i < this.userFiles.length; i++) {
+      const f = this.userFiles[i];
+      if (
+        f.id === idOrName ||
+        f.name.toLowerCase() === idOrName.toLowerCase() ||
+        this.nativeUriMap.get(f.id) === idOrName ||
+        this.nativeUriMap.get(f.name) === idOrName
+      ) {
+        if (f.pageCount !== pageCount) {
+          this.userFiles[i] = { ...f, pageCount };
+          changed = true;
+        }
+      }
+    }
+
+    if (this.pdfCache.has(idOrName)) {
+      const cached = this.pdfCache.get(idOrName)!;
+      cached.pageCount = pageCount;
+    }
+
+    if (changed) {
+      this.saveToStorage();
+      this.notify();
+    }
+    return changed;
+  }
+
+  /**
+   * Automatically resolves and updates actual page counts for all files in the background.
+   */
+  public async resolveMissingPageCounts(): Promise<void> {
+    let anyChanged = false;
+    for (const f of [...this.userFiles]) {
+      const uri = this.nativeUriMap.get(f.id) || this.nativeUriMap.get(f.name);
+      if (uri) {
+        try {
+          const bytes = await readNativePdfBytes(uri);
+          if (bytes) {
+            const info = await extractPdfInfoFromBytesAsync(bytes);
+            if (info.pageCount && info.pageCount > 0 && info.pageCount !== f.pageCount) {
+              const updated = this.updatePageCount(f.id, info.pageCount);
+              if (updated) anyChanged = true;
+            }
+          }
+        } catch {}
+      }
+    }
+    if (anyChanged) {
+      this.notify();
+    }
   }
 
   public deleteDeviceFile(id: string) {

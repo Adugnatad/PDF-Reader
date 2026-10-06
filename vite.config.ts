@@ -20,7 +20,7 @@ export default defineConfig(() => {
       extensions: ['.web.tsx', '.web.ts', '.web.jsx', '.web.js', '.tsx', '.ts', '.jsx', '.js'],
     },
     define: {
-      global: 'window',
+      global: 'globalThis',
       __DEV__: JSON.stringify(true),
     },
     server: {

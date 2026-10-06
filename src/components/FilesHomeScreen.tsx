@@ -524,7 +524,9 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
                     </Text>
                     <View style={styles.metaRow}>
                       <Text style={styles.metaText}>
-                        {file.pageCount || 1} pages
+                        {file.pageCount === 1
+                          ? "1 page"
+                          : `${file.pageCount || 1} pages`}
                       </Text>
                       <Text style={styles.metaDot}>•</Text>
                       <Text style={styles.metaText}>{file.size}</Text>

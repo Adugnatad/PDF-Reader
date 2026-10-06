@@ -126,10 +126,13 @@ export async function extractPdfInfoFromBytesAsync(
   buffer: ArrayBuffer | Uint8Array
 ): Promise<PdfMetadataInfo> {
   try {
-    const doc = await PDFDocument.load(buffer, { ignoreEncryption: true });
+    const doc = await PDFDocument.load(buffer, {
+      ignoreEncryption: true,
+      parseSpeed: 1,
+    });
+    const pageCount = doc.getPageCount();
     const rawTitle = doc.getTitle();
     const rawSubject = doc.getSubject();
-    const pageCount = doc.getPageCount() || 1;
 
     let title: string | null = null;
     if (rawTitle && rawTitle.trim() && !isJunkTitle(rawTitle) && !isUuidOrHash(rawTitle)) {
@@ -138,14 +141,19 @@ export async function extractPdfInfoFromBytesAsync(
       title = cleanDocumentName(rawSubject);
     }
 
-    return { title, pageCount };
+    if (pageCount && pageCount > 0) {
+      return { title, pageCount };
+    }
   } catch {
-    return { title: null, pageCount: 1 };
+    // Fall back to robust binary stream parsing
   }
+
+  return extractPdfInfoFromBytes(buffer);
 }
 
 /**
- * Synchronous fallback extractor for page count and title
+ * Robust binary fallback extractor for page count and title.
+ * Analyzes both head and tail of the file for /Pages /Count and /Type /Page objects.
  */
 export function extractPdfInfoFromBytes(
   buffer: ArrayBuffer | Uint8Array
@@ -161,29 +169,75 @@ export function extractPdfInfoFromBytes(
     return { title: null, pageCount: 1 };
   }
 
-  const sampleSize = Math.min(bytes.length, 250000);
-  let text = '';
-  for (let i = 0; i < sampleSize; i++) {
-    text += String.fromCharCode(bytes[i]);
+  // Sample beginning (head) and end (tail) of the file
+  const headLimit = Math.min(bytes.length, 350000);
+  let headText = '';
+  for (let i = 0; i < headLimit; i++) {
+    headText += String.fromCharCode(bytes[i]);
   }
 
+  let tailText = '';
+  if (bytes.length > 350000) {
+    const tailStart = Math.max(0, bytes.length - 350000);
+    for (let i = tailStart; i < bytes.length; i++) {
+      tailText += String.fromCharCode(bytes[i]);
+    }
+  }
+
+  const combinedText = headText + '\n' + tailText;
+
   let title: string | null = null;
-  const titleMatch = text.match(/\/Title\s*\(([^)\r\n]{2,120})\)/i);
-  if (titleMatch && titleMatch[1].trim()) {
-    const candidate = cleanDocumentName(titleMatch[1].trim());
-    if (candidate && !isJunkTitle(candidate) && !isUuidOrHash(candidate)) {
-      title = candidate;
+  const titleMatch = combinedText.match(/\/Title\s*(?:\(([^)\r\n]{2,120})\)|<([0-9a-fA-F]{4,240})>)/i);
+  if (titleMatch) {
+    let rawTitle = '';
+    if (titleMatch[1]) {
+      rawTitle = titleMatch[1].trim();
+    } else if (titleMatch[2]) {
+      const hex = titleMatch[2];
+      try {
+        for (let k = 0; k < hex.length; k += 2) {
+          const code = parseInt(hex.substr(k, 2), 16);
+          if (code >= 32 && code <= 126) rawTitle += String.fromCharCode(code);
+        }
+      } catch {}
+    }
+    if (rawTitle) {
+      const candidate = cleanDocumentName(rawTitle);
+      if (candidate && !isJunkTitle(candidate) && !isUuidOrHash(candidate)) {
+        title = candidate;
+      }
     }
   }
 
   let pageCount = 1;
-  const countMatches = [...text.matchAll(/\/Type\s*\/Pages[\s\S]*?\/Count\s+(\d+)/gi)];
-  if (countMatches.length > 0) {
-    const val = parseInt(countMatches[countMatches.length - 1][1], 10);
-    if (val > 0 && val < 10000) pageCount = val;
+  const foundCounts: number[] = [];
+
+  // Match /Type /Pages ... /Count N (or /Pages ... /Count N)
+  const forwardMatches = combinedText.matchAll(/(?:\/Type\s*\/Pages|\/Pages)[\s\S]{0,400}?\/Count\s+(\d+)/gi);
+  for (const m of forwardMatches) {
+    const val = parseInt(m[1], 10);
+    if (val > 0 && val < 50000) foundCounts.push(val);
   }
 
-  return { title, pageCount };
+  // Match /Count N ... /Type /Pages
+  const reverseMatches = combinedText.matchAll(/\/Count\s+(\d+)[\s\S]{0,400}?(?:\/Type\s*\/Pages|\/Pages)/gi);
+  for (const m of reverseMatches) {
+    const val = parseInt(m[1], 10);
+    if (val > 0 && val < 50000) foundCounts.push(val);
+  }
+
+  if (foundCounts.length > 0) {
+    // The root /Pages node has the total page count across the document tree
+    pageCount = Math.max(...foundCounts);
+  } else {
+    // Count individual /Type /Page (singular) objects
+    const pageNodes = combinedText.match(/\/Type\s*\/Page(?!\w)/gi);
+    if (pageNodes && pageNodes.length > 0) {
+      pageCount = pageNodes.length;
+    }
+  }
+
+  return { title, pageCount: Math.max(1, pageCount) };
 }
 
 /**
