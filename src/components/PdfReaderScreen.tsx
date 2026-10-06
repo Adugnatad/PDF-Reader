@@ -194,6 +194,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
 
   const [showViewModeModal, setShowViewModeModal] = useState<boolean>(false);
   const [zoom, setZoom] = useState<number>(1.0);
+  const [nativeScale, setNativeScale] = useState<number>(1.0);
   const [rotation, setRotation] = useState<number>(0);
   const [showThumbnails, setShowThumbnails] = useState<boolean>(false);
   const [isBookmarked, setIsBookmarked] = useState<boolean>(false);
@@ -619,6 +620,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
   const handleZoomIn = () => {
     setZoom((prev) => {
       const next = Math.min(2.5, +(prev + 0.2).toFixed(1));
+      setNativeScale(next);
       onShowToast(`Zoom: ${Math.round(next * 100)}%`);
       return next;
     });
@@ -627,6 +629,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
   const handleZoomOut = () => {
     setZoom((prev) => {
       const next = Math.max(0.6, +(prev - 0.2).toFixed(1));
+      setNativeScale(next);
       onShowToast(`Zoom: ${Math.round(next * 100)}%`);
       return next;
     });
@@ -634,6 +637,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
 
   const handleFitWidth = () => {
     setZoom(1.0);
+    setNativeScale(1.0);
     onShowToast("Zoom reset to 100% (Fit Width)");
   };
 
@@ -1065,11 +1069,11 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                     <Pdf
                       ref={canvasRef as any}
                       source={pdfSource}
-                      scale={zoom}
+                      scale={Platform.OS === "web" ? zoom : nativeScale}
                       minScale={0.5}
                       maxScale={4.0}
                       fitPolicy={0}
-                      enablePaging={viewMode === "single" && zoom <= 1.05}
+                      enablePaging={viewMode === "single"}
                       enableAntialiasing={true}
                       enableDoubleTapZoom={true}
                       spacing={10}
