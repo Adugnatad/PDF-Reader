@@ -217,7 +217,7 @@ class PdfThumbnailService {
               const page = await doc.getPage(1);
               // Scale to a sharp ~120px width preview
               const baseVp = page.getViewport({ scale: 1.0 });
-              const targetWidth = 120;
+              const targetWidth = 160;
               const scale = targetWidth / Math.max(1, baseVp.width);
               const vp = page.getViewport({ scale });
 
@@ -226,9 +226,13 @@ class PdfThumbnailService {
               canvas.height = Math.floor(vp.height);
               const ctx = canvas.getContext('2d');
               if (ctx) {
+                // Fill crisp white background so transparent pages don't render black or empty
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
                 await (page.render as any)({ canvasContext: ctx, viewport: vp, canvas })
                   .promise;
-                const thumbDataUrl = canvas.toDataURL('image/jpeg', 0.82);
+                const thumbDataUrl = canvas.toDataURL('image/jpeg', 0.85);
 
                 if (thumbDataUrl && thumbDataUrl.startsWith('data:image/')) {
                   this.cache.set(fileId, thumbDataUrl);
@@ -254,13 +258,8 @@ class PdfThumbnailService {
           return embeddedJpeg;
         }
 
-        // C. Clean SVG Vector Document Preview
-        const svgPreview = generateDocumentVectorPreview(fileName || item.name || fileId);
-        this.cache.set(fileId, svgPreview);
-        if (fileName) this.cache.set(fileName, svgPreview);
-        this.notify(fileId, svgPreview);
-        this.scheduleSave();
-        return svgPreview;
+        // C. On native or when no embedded image, return null so NativeDocumentSheet renders crisp UI
+        return null;
       } catch (err) {
         console.warn('Generate thumbnail note:', err);
         return null;
