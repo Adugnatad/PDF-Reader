@@ -18,14 +18,12 @@ function cloneBufferSafe(data: Uint8Array | ArrayBuffer): Uint8Array {
 
 /**
  * Searches for embedded JPEG image stream inside raw PDF binary bytes.
- * Scanned PDFs, contracts with photos/logos, and photo-based PDFs embed JPEGs directly.
  */
 function extractEmbeddedJpeg(bytes: Uint8Array): string | null {
   const maxScan = Math.min(bytes.length, 3 * 1024 * 1024);
   for (let i = 0; i < maxScan - 4; i++) {
     // Check for JPEG magic header: 0xFF 0xD8 0xFF
     if (bytes[i] === 0xff && bytes[i + 1] === 0xd8 && bytes[i + 2] === 0xff) {
-      // Find matching JPEG EOI marker: 0xFF 0xD9
       const endLimit = Math.min(bytes.length, i + 1024 * 1024);
       for (let j = i + 200; j < endLimit - 1; j++) {
         if (bytes[j] === 0xff && bytes[j + 1] === 0xd9) {
@@ -38,60 +36,6 @@ function extractEmbeddedJpeg(bytes: Uint8Array): string | null {
     }
   }
   return null;
-}
-
-/**
- * Generates an authentic SVG vector preview of a document page.
- * Renders like a real A4 sheet with title, header band, and realistic paragraph lines.
- */
-function generateDocumentVectorPreview(docTitle: string): string {
-  const cleanTitle = (docTitle || 'PDF Document')
-    .replace(/\.pdf$/i, '')
-    .trim()
-    .slice(0, 24);
-
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 130" width="100" height="130">
-    <defs>
-      <linearGradient id="pageGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-        <stop offset="0%" stop-color="#ffffff"/>
-        <stop offset="100%" stop-color="#f1f5f9"/>
-      </linearGradient>
-      <linearGradient id="headerGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-        <stop offset="0%" stop-color="#ef4444"/>
-        <stop offset="100%" stop-color="#f87171"/>
-      </linearGradient>
-    </defs>
-    <!-- Paper Sheet Background -->
-    <rect x="0" y="0" width="100" height="130" rx="6" fill="url(#pageGrad)"/>
-    <!-- Page Header Accent -->
-    <rect x="8" y="10" width="84" height="4" rx="2" fill="url(#headerGrad)"/>
-    <!-- Title Line -->
-    <rect x="8" y="18" width="55" height="5" rx="1.5" fill="#1e293b"/>
-    <!-- Document Text Lines -->
-    <rect x="8" y="28" width="84" height="2.5" rx="1" fill="#94a3b8"/>
-    <rect x="8" y="34" width="80" height="2.5" rx="1" fill="#cbd5e1"/>
-    <rect x="8" y="40" width="84" height="2.5" rx="1" fill="#cbd5e1"/>
-    <rect x="8" y="46" width="60" height="2.5" rx="1" fill="#cbd5e1"/>
-
-    <!-- Mid Section Block -->
-    <rect x="8" y="55" width="40" height="20" rx="3" fill="#e2e8f0"/>
-    <rect x="52" y="56" width="40" height="2.5" rx="1" fill="#94a3b8"/>
-    <rect x="52" y="62" width="36" height="2.5" rx="1" fill="#cbd5e1"/>
-    <rect x="52" y="68" width="38" height="2.5" rx="1" fill="#cbd5e1"/>
-
-    <!-- Bottom Paragraph Lines -->
-    <rect x="8" y="82" width="84" height="2.5" rx="1" fill="#cbd5e1"/>
-    <rect x="8" y="88" width="84" height="2.5" rx="1" fill="#cbd5e1"/>
-    <rect x="8" y="94" width="70" height="2.5" rx="1" fill="#cbd5e1"/>
-    <rect x="8" y="100" width="45" height="2.5" rx="1" fill="#cbd5e1"/>
-
-    <!-- Signature / Footer Seal -->
-    <line x1="8" y1="112" x2="38" y2="112" stroke="#94a3b8" stroke-width="1.5"/>
-    <rect x="74" y="106" width="18" height="12" rx="2" fill="#ef4444" opacity="0.15"/>
-    <text x="83" y="115" font-family="system-ui, sans-serif" font-size="7" font-weight="900" fill="#dc2626" text-anchor="middle">PDF</text>
-  </svg>`;
-
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
 class PdfThumbnailService {
@@ -107,13 +51,18 @@ class PdfThumbnailService {
 
   private async initFromStorage(): Promise<void> {
     try {
-      const saved = await loadThumbnailsFromDisk();
-      if (saved) {
-        const obj = JSON.parse(saved);
-        if (typeof obj === 'object' && obj !== null) {
-          for (const [k, v] of Object.entries(obj)) {
-            if (typeof v === 'string' && v.startsWith('data:image/')) {
-              this.cache.set(k, v);
+      if (typeof loadThumbnailsFromDisk === 'function') {
+        const saved = await loadThumbnailsFromDisk();
+        if (saved) {
+          const obj = JSON.parse(saved);
+          if (obj && typeof obj === 'object') {
+            for (const k in obj) {
+              if (Object.prototype.hasOwnProperty.call(obj, k)) {
+                const v = obj[k];
+                if (typeof v === 'string' && v.startsWith('data:image/')) {
+                  this.cache.set(k, v);
+                }
+              }
             }
           }
         }
@@ -136,7 +85,9 @@ class PdfThumbnailService {
           if (count++ > 80) break;
           obj[k] = v;
         }
-        saveThumbnailsToDisk(JSON.stringify(obj)).catch(() => {});
+        if (typeof saveThumbnailsToDisk === 'function') {
+          saveThumbnailsToDisk(JSON.stringify(obj)).catch(() => {});
+        }
       } catch {}
     }, 1500);
   }
@@ -215,7 +166,6 @@ class PdfThumbnailService {
             const doc = await loadingTask.promise;
             if (doc && doc.numPages > 0) {
               const page = await doc.getPage(1);
-              // Scale to a sharp ~120px width preview
               const baseVp = page.getViewport({ scale: 1.0 });
               const targetWidth = 160;
               const scale = targetWidth / Math.max(1, baseVp.width);
@@ -258,7 +208,7 @@ class PdfThumbnailService {
           return embeddedJpeg;
         }
 
-        // C. On native or when no embedded image, return null so NativeDocumentSheet renders crisp UI
+        // C. On native, return null so NativeDocumentSheet renders crisp UI
         return null;
       } catch (err) {
         console.warn('Generate thumbnail note:', err);

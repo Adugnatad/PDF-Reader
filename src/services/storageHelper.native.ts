@@ -79,7 +79,7 @@ export async function loadViewModeSettings(): Promise<ViewModeSettings | null> {
 }
 
 export async function saveThumbnailsToDisk(payload: string): Promise<void> {
-  if (THUMBNAILS_FILE) {
+  if (THUMBNAILS_FILE && typeof FileSystem?.writeAsStringAsync === 'function') {
     try {
       await FileSystem.writeAsStringAsync(THUMBNAILS_FILE, payload);
     } catch (e) {
@@ -89,10 +89,10 @@ export async function saveThumbnailsToDisk(payload: string): Promise<void> {
 }
 
 export async function loadThumbnailsFromDisk(): Promise<string | null> {
-  if (THUMBNAILS_FILE) {
+  if (THUMBNAILS_FILE && typeof FileSystem?.getInfoAsync === 'function') {
     try {
       const info = await FileSystem.getInfoAsync(THUMBNAILS_FILE);
-      if (info.exists) {
+      if (info?.exists && typeof FileSystem?.readAsStringAsync === 'function') {
         return await FileSystem.readAsStringAsync(THUMBNAILS_FILE);
       }
     } catch (e) {
