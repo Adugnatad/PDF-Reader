@@ -57,6 +57,7 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
 
   // Subscribe to updates; restore files from the persisted registry without rescanning.
   React.useEffect(() => {
+    pdfStore.prewarmAllPdfs();
     const unsub = pdfStore.subscribe(() => {
       setDeviceFiles(pdfStore.getAllFiles());
     });
@@ -593,6 +594,7 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
                 <TouchableOpacity
                   key={file.id}
                   onPress={() => handleCardPress(file, displayName)}
+                  onPressIn={() => pdfStore.prewarmPdf(file.id)}
                   style={styles.fileCard}
                   activeOpacity={0.7}
                 >

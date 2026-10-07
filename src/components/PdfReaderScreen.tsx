@@ -30,6 +30,7 @@ import Pdf from "react-native-pdf";
 import { fastUint8ToBase64 } from "../utils/fastBase64";
 import {
   getPdfLocalUri,
+  getCachedLocalUri,
   openInNativeSystemViewer,
 } from "../services/nativePdfOpener";
 import {
@@ -75,17 +76,32 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
   docTitle = "Q4_Tax_Filing_Signed.pdf",
   docId,
 }) => {
-  // Document State
-  const [activeTitle, setActiveTitle] = useState(docTitle);
-  const [activeId, setActiveId] = useState(docId || docTitle);
-  const [pdfBytes, setPdfBytes] = useState<Uint8Array | ArrayBuffer | null>(
-    null,
+  // Instantaneous Document State Initialization from Cache
+  const initialActiveId = docId || docTitle;
+  const initialCached =
+    pdfStore.getCachedPdf(initialActiveId) ||
+    pdfStore.getCachedPdf(docTitle);
+
+  const initialNativeUri =
+    initialCached?.nativeUri ||
+    (initialCached?.data
+      ? getCachedLocalUri(initialCached.name, initialCached.data.byteLength) || ""
+      : "");
+
+  const [activeTitle, setActiveTitle] = useState(
+    initialCached ? initialCached.name : docTitle
   );
-  const [nativePdfUri, setNativePdfUri] = useState("");
+  const [activeId, setActiveId] = useState(initialActiveId);
+  const [pdfBytes, setPdfBytes] = useState<Uint8Array | ArrayBuffer | null>(
+    initialCached ? initialCached.data : null
+  );
+  const [nativePdfUri, setNativePdfUri] = useState<string>(initialNativeUri);
   const [pdfDoc, setPdfDoc] = useState<any>(null);
-  const [numPages, setNumPages] = useState<number>(0);
+  const [numPages, setNumPages] = useState<number>(
+    initialCached?.pageCount || 0
+  );
   const [currentPage, setCurrentPage] = useState<number>(1);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isLoading, setIsLoading] = useState<boolean>(!initialCached);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   // View & Layout Settings
@@ -323,33 +339,47 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
   // Continuous page canvas refs
   const continuousCanvases = useRef<Map<number, any>>(new Map());
 
-  // 1. Fetch PDF Data from store
+  // 1. Fetch PDF Data from store with zero-delay cache utilization
   useEffect(() => {
     let isCancelled = false;
-    setIsLoading(true);
+    if (!pdfBytes && !nativePdfUri) {
+      setIsLoading(true);
+    }
     setLoadError(null);
 
     async function loadPdf() {
       try {
-        setNativePdfUri("");
-        const item = await pdfStore.getPdfData(activeId);
-        if (isCancelled) return;
-        setPdfBytes(item.data);
-        setActiveTitle(item.name);
+        let currentItem = initialCached;
+        let currentBytes = pdfBytes;
+        let currentUri = nativePdfUri;
+
+        if (!currentBytes || !currentItem) {
+          const item = await pdfStore.getPdfData(activeId);
+          if (isCancelled) return;
+          currentItem = item as any;
+          currentBytes = item.data;
+          setPdfBytes(item.data);
+          setActiveTitle(item.name);
+          currentUri = item.nativeUri || currentUri;
+        }
 
         if (Platform.OS !== "web") {
-          const directUri =
-            item.nativeUri || (await getPdfLocalUri(item.data, item.name));
-          if (isCancelled) return;
-          setNativePdfUri(directUri);
+          if (!currentUri && currentBytes) {
+            currentUri = await getPdfLocalUri(currentBytes, currentItem?.name || activeTitle);
+            if (isCancelled) return;
+          }
+          if (currentUri && currentUri !== nativePdfUri) {
+            setNativePdfUri(currentUri);
+          }
+          setIsLoading(false);
         }
 
         // On Web, initialize pdfjsLib for search, reflow, and continuous view
-        if (Platform.OS === "web") {
+        if (Platform.OS === "web" && currentBytes) {
           const bufferCopy =
-            item.data instanceof Uint8Array
-              ? item.data.slice()
-              : new Uint8Array(item.data).slice();
+            currentBytes instanceof Uint8Array
+              ? currentBytes.slice()
+              : new Uint8Array(currentBytes).slice();
 
           const loadingTask = pdfjsLib.getDocument({
             data: bufferCopy,
@@ -364,9 +394,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
           }
           setCurrentPage(1);
           setIsLoading(false);
-        } else {
-          // On native devices, react-native-pdf onLoadComplete supplies numPages
-          setCurrentPage(1);
+        } else if (Platform.OS !== "web") {
           setIsLoading(false);
         }
       } catch (err: any) {
@@ -402,10 +430,10 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
         try {
           if (Platform.OS === "web" && typeof document !== "undefined") {
             const page = await pdfDoc.getPage(i);
-            const thumbViewport = page.getViewport({ scale: 0.22, rotation });
+            const thumbViewport = page?.getViewport({ scale: 0.22, rotation });
             const thumbCanvas = document.createElement("canvas");
-            thumbCanvas.width = Math.floor(thumbViewport.width);
-            thumbCanvas.height = Math.floor(thumbViewport.height);
+            thumbCanvas.width = Math.floor(thumbViewport?.width || 120);
+            thumbCanvas.height = Math.floor(thumbViewport?.height || 160);
             const ctx = thumbCanvas.getContext("2d");
             if (ctx) {
               await page.render({ canvasContext: ctx, viewport: thumbViewport })
@@ -539,15 +567,25 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
   // 4. Synchronize drawing overlay canvas size with PDF page viewport
   useEffect(() => {
     if (Platform.OS !== "web") return;
-    const canvas = canvasRef.current;
     const drawCanvas = drawCanvasRef.current;
-    if (canvas && drawCanvas) {
-      drawCanvas.width = canvas.width;
-      drawCanvas.height = canvas.height;
-      drawCanvas.style.width = canvas.style.width;
-      drawCanvas.style.height = canvas.style.height;
+    if (!drawCanvas) return;
+
+    const parent = drawCanvas.parentElement;
+    const width = parent?.clientWidth || drawCanvas.clientWidth || 360;
+    const height = parent?.clientHeight || drawCanvas.clientHeight || 500;
+    const dpr = (typeof window !== "undefined" && window.devicePixelRatio) || 1;
+
+    if (width > 0 && height > 0) {
+      drawCanvas.width = Math.floor(width * dpr);
+      drawCanvas.height = Math.floor(height * dpr);
+      drawCanvas.style.width = `${width}px`;
+      drawCanvas.style.height = `${height}px`;
+      const ctx = drawCanvas.getContext("2d");
+      if (ctx) {
+        ctx.scale(dpr, dpr);
+      }
     }
-  }, [currentPage, zoom, rotation]);
+  }, [currentPage, zoom, rotation, viewMode]);
 
   // 5. Render Continuous Scroll Pages
   useEffect(() => {
@@ -921,16 +959,14 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
 
         return (
           <MainBody {...(bodyProps as any)}>
-            {/* Loading State */}
-        {isLoading && (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#7bd0ff" />
-            <Text style={styles.loadingTitle}>Opening PDF Engine...</Text>
-            <Text style={styles.loadingSubtitle}>{activeTitle}</Text>
-          </View>
-        )}
+            {/* Non-Blocking Instant Top Progress Bar */}
+            {isLoading && (
+              <View style={styles.topProgressLineContainer}>
+                <View style={styles.topProgressLineActive} />
+              </View>
+            )}
 
-        {/* Load Error State */}
+            {/* Load Error State */}
         {loadError && !isLoading && (
           <View style={styles.errorContainer}>
             <Ionicons name="alert-circle-outline" size={48} color="#ff516a" />
@@ -1081,6 +1117,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                       enableAntialiasing={true}
                       enableDoubleTapZoom={true}
                       spacing={10}
+                      renderActivityIndicator={() => <View />}
                       horizontal={readingDirection === "horizontal"}
                       onPageSingleTap={handleSingleTap}
                       onScaleChanged={handleScaleChanged}
@@ -1819,6 +1856,21 @@ const styles = StyleSheet.create({
     alignItems: "stretch",
     width: "100%",
     flexGrow: 1,
+  },
+  topProgressLineContainer: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 3,
+    backgroundColor: "rgba(123, 208, 255, 0.2)",
+    zIndex: 99,
+    overflow: "hidden",
+  },
+  topProgressLineActive: {
+    height: "100%",
+    width: "100%",
+    backgroundColor: "#7bd0ff",
   },
   loadingContainer: {
     paddingVertical: 60,

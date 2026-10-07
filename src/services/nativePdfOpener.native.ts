@@ -5,6 +5,17 @@ import { fastUint8ToBase64 } from '../utils/fastBase64';
 // Cache written URIs so we don't rewrite the same PDF repeatedly
 const uriCache = new Map<string, string>();
 
+export function getCachedLocalUri(fileName: string, byteLength?: number): string | null {
+  if (byteLength) {
+    const key = `${fileName}_${byteLength}`;
+    if (uriCache.has(key)) return uriCache.get(key)!;
+  }
+  for (const [k, uri] of uriCache.entries()) {
+    if (k.startsWith(fileName)) return uri;
+  }
+  return null;
+}
+
 /**
  * Checks if native device sharing/quicklook is available
  */

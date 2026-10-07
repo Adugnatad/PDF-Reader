@@ -354,6 +354,63 @@ class PdfStoreService {
     return this.nativeUriMap.get(idOrTitle);
   }
 
+  /**
+   * Synchronously returns cached PDF data if available in memory for instantaneous 0ms opening
+   */
+  public getCachedPdf(docIdOrTitle: string): StoredPdf | null {
+    if (!docIdOrTitle) return null;
+    if (this.pdfCache.has(docIdOrTitle)) {
+      const item = this.pdfCache.get(docIdOrTitle)!;
+      if (!isBufferDetached(item.data)) return item;
+    }
+    const clean = docIdOrTitle.toLowerCase().trim();
+    for (const [key, item] of this.pdfCache.entries()) {
+      if (
+        key.toLowerCase() === clean ||
+        item.name.toLowerCase() === clean ||
+        item.name.toLowerCase().replace(/\.pdf$/i, '') === clean.replace(/\.pdf$/i, '') ||
+        item.id.toLowerCase() === clean
+      ) {
+        if (!isBufferDetached(item.data)) return item;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Proactively warms up the PDF bytes and native URI ahead of time
+   */
+  public async prewarmPdf(docIdOrTitle: string): Promise<void> {
+    if (!docIdOrTitle) return;
+    if (this.getCachedPdf(docIdOrTitle)) return;
+    try {
+      await this.getPdfData(docIdOrTitle);
+    } catch {}
+  }
+
+  /**
+   * Asynchronously prewarms device and library PDFs in the background
+   */
+  public prewarmAllPdfs(): void {
+    const filesToWarm = this.userFiles.slice(0, 20);
+    let index = 0;
+    const warmNext = async () => {
+      if (index >= filesToWarm.length) return;
+      const file = filesToWarm[index++];
+      try {
+        if (!this.getCachedPdf(file.id)) {
+          await this.getPdfData(file.id);
+        }
+      } catch {}
+      if (typeof setTimeout !== 'undefined') {
+        setTimeout(warmNext, 80);
+      }
+    };
+    if (typeof setTimeout !== 'undefined') {
+      setTimeout(warmNext, 120);
+    }
+  }
+
   public async getPdfData(
     docIdOrTitle: string
   ): Promise<{

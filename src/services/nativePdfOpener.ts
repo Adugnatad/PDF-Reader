@@ -5,6 +5,10 @@ export async function isNativeSystemViewerAvailable(): Promise<boolean> {
   return false;
 }
 
+export function getCachedLocalUri(fileName: string, byteLength?: number): string | null {
+  return null;
+}
+
 export async function getPdfLocalUri(pdfBytes: Uint8Array | ArrayBuffer, fileName: string): Promise<string> {
   const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
   return URL.createObjectURL(blob);
