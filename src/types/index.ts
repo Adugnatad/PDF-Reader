@@ -16,6 +16,7 @@ export interface DocFile {
   folder?: 'Downloads' | 'Documents' | 'Scans' | 'Books';
   favorite?: boolean;
   lastReadPage?: number;
+  lastOpenedAt?: number;
 }
 
 export interface SheetRow {

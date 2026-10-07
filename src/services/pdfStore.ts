@@ -626,6 +626,40 @@ class PdfStoreService {
     return this.userFiles.filter((f) => !isJunkDocument(f.name, f.id));
   }
 
+  public toggleFavorite(id: string): boolean {
+    let newFavState = false;
+    let found = false;
+    this.userFiles = this.userFiles.map((f) => {
+      if (f.id === id) {
+        newFavState = !f.favorite;
+        found = true;
+        return { ...f, favorite: newFavState };
+      }
+      return f;
+    });
+    if (found) {
+      this.saveToStorage();
+      this.notify();
+    }
+    return newFavState;
+  }
+
+  public recordFileOpened(idOrName: string): void {
+    let found = false;
+    const now = Date.now();
+    this.userFiles = this.userFiles.map((f) => {
+      if (f.id === idOrName || f.name.toLowerCase() === idOrName.toLowerCase()) {
+        found = true;
+        return { ...f, lastOpenedAt: now };
+      }
+      return f;
+    });
+    if (found) {
+      this.saveToStorage();
+      this.notify();
+    }
+  }
+
   /**
    * Download the PDF as a file in browser
    */

@@ -64,6 +64,7 @@ export default function IndexScreen() {
   }, []);
 
   const handleOpenFile = (file: DocFile) => {
+    pdfStore.recordFileOpened(file.id);
     if (file.type === 'xlsx') {
       router.push({
         pathname: '/spreadsheet',

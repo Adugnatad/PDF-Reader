@@ -41,6 +41,9 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
   );
   const [sortAsc, setSortAsc] = useState(false);
   const [showSortMenu, setShowSortMenu] = useState(false);
+  const [activeBottomTab, setActiveBottomTab] = useState<
+    "document" | "recent" | "favorite"
+  >("document");
   const [isScanning, setIsScanning] = useState(false);
   const [renameModalVisible, setRenameModalVisible] = useState(false);
   const [editingFileId, setEditingFileId] = useState<string | null>(null);
@@ -189,16 +192,17 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
     }
   };
 
+  const handleCardPress = (file: DocFile, displayName: string) => {
+    pdfStore.recordFileOpened(file.id);
+    onOpenFile({ ...file, name: displayName });
+  };
+
   // Toggle favorite
   const handleToggleFavorite = (fileId: string, e: any) => {
     e.stopPropagation?.();
-    setDeviceFiles((prev) =>
-      prev.map((f) => (f.id === fileId ? { ...f, favorite: !f.favorite } : f)),
-    );
-    const target = deviceFiles.find((f) => f.id === fileId);
-    onShowToast(
-      target?.favorite ? "Removed from favorites" : "Added to favorites",
-    );
+    const newFav = pdfStore.toggleFavorite(fileId);
+    setDeviceFiles(pdfStore.getAllFiles());
+    onShowToast(newFav ? "Added to favorites" : "Removed from favorites");
   };
 
   // Remove file from recent documents
@@ -232,15 +236,28 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
 
   // Filtered and sorted PDFs
   const filteredFiles = useMemo(() => {
-    return deviceFiles
-      .filter((file) => {
-        if (searchQuery) {
-          const q = searchQuery.toLowerCase();
-          return file.name.toLowerCase().includes(q);
-        }
-        return true;
-      })
-      .sort((a, b) => {
+    let list = deviceFiles;
+
+    // Filter based on active bottom tab
+    if (activeBottomTab === "favorite") {
+      list = list.filter((f) => f.favorite);
+    } else if (activeBottomTab === "recent") {
+      // For Recent tab: prioritize files opened recently, then fallback to newest
+      list = [...list].sort((a, b) => {
+        const timeA = a.lastOpenedAt || 0;
+        const timeB = b.lastOpenedAt || 0;
+        if (timeA !== timeB) return timeB - timeA;
+        return b.id.localeCompare(a.id);
+      });
+    }
+
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter((file) => file.name.toLowerCase().includes(q));
+    }
+
+    if (activeBottomTab !== "recent" || sortBy !== "date") {
+      list = [...list].sort((a, b) => {
         if (sortBy === "name") {
           return sortAsc
             ? a.name.localeCompare(b.name)
@@ -259,25 +276,56 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
         // Default date modified
         return sortAsc ? a.id.localeCompare(b.id) : b.id.localeCompare(a.id);
       });
-  }, [deviceFiles, searchQuery, sortBy, sortAsc]);
+    }
+
+    return list;
+  }, [deviceFiles, searchQuery, sortBy, sortAsc, activeBottomTab]);
+
+  const getHeaderTitle = () => {
+    switch (activeBottomTab) {
+      case "recent":
+        return "Recent";
+      case "favorite":
+        return "Favorites";
+      case "document":
+      default:
+        return "Documents";
+    }
+  };
+
+  const getHeaderSubtitle = () => {
+    const count = filteredFiles.length;
+    const label = count === 1 ? "document" : "documents";
+    switch (activeBottomTab) {
+      case "recent":
+        return `${count} recent ${label}`;
+      case "favorite":
+        return `${count} favorite ${label}`;
+      case "document":
+      default:
+        return `${count} ${label} on device`;
+    }
+  };
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.scrollContent}
-    >
-      {/* Top Header */}
-      <View style={styles.header}>
-        <View style={styles.titleRow}>
-          <View style={styles.titleGroup}>
-            <View style={styles.appIconBadge}>
-              <MaterialIcons name="picture-as-pdf" size={22} color="#ff516a" />
+    <View style={styles.rootContainer}>
+      <ScrollView
+        style={styles.scrollContainer}
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+      >
+        {/* Top Header */}
+        <View style={styles.header}>
+          <View style={styles.titleRow}>
+            <View style={styles.titleGroup}>
+              <View style={styles.appIconBadge}>
+                <MaterialIcons name="picture-as-pdf" size={22} color="#ff516a" />
+              </View>
+              <View>
+                <Text style={styles.headerTitle}>{getHeaderTitle()}</Text>
+                <Text style={styles.headerSubtitle}>{getHeaderSubtitle()}</Text>
+              </View>
             </View>
-            <View>
-              <Text style={styles.headerTitle}>PDF Reader</Text>
-              <Text style={styles.headerSubtitle}>All PDF Documents</Text>
-            </View>
-          </View>
 
           {/* Header Quick Actions */}
           <View style={styles.headerActions}>
@@ -453,17 +501,43 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
         <View style={styles.filesList}>
           {filteredFiles.length === 0 ? (
             <View style={styles.emptyContainer}>
-              <View style={styles.emptyIconCircle}>
+              <View
+                style={[
+                  styles.emptyIconCircle,
+                  activeBottomTab === "favorite" && {
+                    backgroundColor: "rgba(245, 158, 11, 0.15)",
+                    borderColor: "rgba(245, 158, 11, 0.3)",
+                  },
+                ]}
+              >
                 <Ionicons
-                  name="document-text-outline"
+                  name={
+                    activeBottomTab === "favorite"
+                      ? "star-outline"
+                      : activeBottomTab === "recent"
+                      ? "time-outline"
+                      : "document-text-outline"
+                  }
                   size={42}
-                  color="#7bd0ff"
+                  color={activeBottomTab === "favorite" ? "#f59e0b" : "#7bd0ff"}
                 />
               </View>
-              <Text style={styles.emptyTitle}>No PDF documents</Text>
+              <Text style={styles.emptyTitle}>
+                {searchQuery
+                  ? "No matching documents"
+                  : activeBottomTab === "favorite"
+                  ? "No favorite documents"
+                  : activeBottomTab === "recent"
+                  ? "No recent documents"
+                  : "No PDF documents"}
+              </Text>
               <Text style={styles.emptySubtitle}>
                 {searchQuery
                   ? `No documents matching "${searchQuery}"`
+                  : activeBottomTab === "favorite"
+                  ? "Tap the star icon on any PDF document card to add it to your favorites."
+                  : activeBottomTab === "recent"
+                  ? "Documents you open will appear here for fast access."
                   : "Open any PDF from your device storage to read with smooth full-screen view, zoom, and annotations."}
               </Text>
               {searchQuery ? (
@@ -472,6 +546,21 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
                   style={styles.emptyActionBtn}
                 >
                   <Text style={styles.emptyActionBtnText}>Clear Search</Text>
+                </TouchableOpacity>
+              ) : activeBottomTab !== "document" ? (
+                <TouchableOpacity
+                  onPress={() => setActiveBottomTab("document")}
+                  style={styles.emptyActionPrimaryBtn}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons
+                    name="document-text-outline"
+                    size={17}
+                    color="#0d0096"
+                  />
+                  <Text style={styles.emptyActionPrimaryBtnText}>
+                    Browse Documents
+                  </Text>
                 </TouchableOpacity>
               ) : (
                 <TouchableOpacity
@@ -503,7 +592,7 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
               return (
                 <TouchableOpacity
                   key={file.id}
-                  onPress={() => onOpenFile({ ...file, name: displayName })}
+                  onPress={() => handleCardPress(file, displayName)}
                   style={styles.fileCard}
                   activeOpacity={0.7}
                 >
@@ -616,17 +705,131 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
           </View>
         </View>
       </Modal>
-    </ScrollView>
+      </ScrollView>
+
+      {/* Bottom Navigation Tab Bar (Document, Recent, Favorite) */}
+      <View style={styles.bottomTabBar}>
+        {/* Document Tab */}
+        <TouchableOpacity
+          onPress={() => setActiveBottomTab("document")}
+          style={styles.tabBtn}
+          activeOpacity={0.7}
+          accessibilityLabel="Document Tab"
+        >
+          <Ionicons
+            name={
+              activeBottomTab === "document"
+                ? "document-text"
+                : "document-text-outline"
+            }
+            size={22}
+            color={activeBottomTab === "document" ? "#ff516a" : "#8e9ba0"}
+          />
+          <Text
+            style={[
+              styles.tabLabel,
+              activeBottomTab === "document" && styles.tabLabelActive,
+            ]}
+          >
+            Document
+          </Text>
+        </TouchableOpacity>
+
+        {/* Recent Tab */}
+        <TouchableOpacity
+          onPress={() => setActiveBottomTab("recent")}
+          style={styles.tabBtn}
+          activeOpacity={0.7}
+          accessibilityLabel="Recent Tab"
+        >
+          <Ionicons
+            name={activeBottomTab === "recent" ? "time" : "time-outline"}
+            size={22}
+            color={activeBottomTab === "recent" ? "#ff516a" : "#8e9ba0"}
+          />
+          <Text
+            style={[
+              styles.tabLabel,
+              activeBottomTab === "recent" && styles.tabLabelActive,
+            ]}
+          >
+            Recent
+          </Text>
+        </TouchableOpacity>
+
+        {/* Favorite Tab */}
+        <TouchableOpacity
+          onPress={() => setActiveBottomTab("favorite")}
+          style={styles.tabBtn}
+          activeOpacity={0.7}
+          accessibilityLabel="Favorite Tab"
+        >
+          <Ionicons
+            name={activeBottomTab === "favorite" ? "star" : "star-outline"}
+            size={22}
+            color={activeBottomTab === "favorite" ? "#ff516a" : "#8e9ba0"}
+          />
+          <Text
+            style={[
+              styles.tabLabel,
+              activeBottomTab === "favorite" && styles.tabLabelActive,
+            ]}
+          >
+            Favorite
+          </Text>
+        </TouchableOpacity>
+      </View>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
+  rootContainer: {
+    flex: 1,
+    backgroundColor: "#0b1326",
+  },
+  scrollContainer: {
+    flex: 1,
+    backgroundColor: "#0b1326",
+  },
   container: {
     flex: 1,
     backgroundColor: "#0b1326",
   },
   scrollContent: {
-    paddingBottom: 48,
+    paddingBottom: 24,
+  },
+  bottomTabBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-around",
+    backgroundColor: "#0e1628",
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255, 255, 255, 0.08)",
+    paddingVertical: 8,
+    paddingBottom: Platform.OS === "ios" ? 22 : 8,
+    elevation: 10,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+  },
+  tabBtn: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 2,
+  },
+  tabLabel: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#8e9ba0",
+    marginTop: 3,
+    letterSpacing: 0.2,
+  },
+  tabLabelActive: {
+    color: "#ff516a",
+    fontWeight: "700",
   },
   header: {
     backgroundColor: "rgba(11, 19, 38, 0.95)",
