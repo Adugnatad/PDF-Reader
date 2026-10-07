@@ -60,3 +60,24 @@ export async function loadViewModeSettings(): Promise<ViewModeSettings | null> {
   }
   return null;
 }
+
+export async function saveThumbnailsToDisk(payload: string): Promise<void> {
+  if (typeof window !== 'undefined' && window.localStorage) {
+    try {
+      window.localStorage.setItem('docuflow_pdf_thumbnails', payload);
+    } catch (e) {
+      console.warn('LocalStorage save thumbnails error:', e);
+    }
+  }
+}
+
+export async function loadThumbnailsFromDisk(): Promise<string | null> {
+  if (typeof window !== 'undefined' && window.localStorage) {
+    try {
+      return window.localStorage.getItem('docuflow_pdf_thumbnails');
+    } catch (e) {
+      console.warn('LocalStorage read thumbnails error:', e);
+    }
+  }
+  return null;
+}

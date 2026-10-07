@@ -21,6 +21,10 @@ const VIEW_SETTINGS_FILE = FileSystem.documentDirectory
   ? `${FileSystem.documentDirectory}docuflow_view_settings.json`
   : null;
 
+const THUMBNAILS_FILE = FileSystem.documentDirectory
+  ? `${FileSystem.documentDirectory}docuflow_thumbnails.json`
+  : null;
+
 export async function saveRegistryToDisk(payload: string): Promise<void> {
   if (REGISTRY_FILE) {
     try {
@@ -69,6 +73,30 @@ export async function loadViewModeSettings(): Promise<ViewModeSettings | null> {
       }
     } catch (e) {
       console.warn('Native read view settings error:', e);
+    }
+  }
+  return null;
+}
+
+export async function saveThumbnailsToDisk(payload: string): Promise<void> {
+  if (THUMBNAILS_FILE) {
+    try {
+      await FileSystem.writeAsStringAsync(THUMBNAILS_FILE, payload);
+    } catch (e) {
+      console.warn('Native save thumbnails error:', e);
+    }
+  }
+}
+
+export async function loadThumbnailsFromDisk(): Promise<string | null> {
+  if (THUMBNAILS_FILE) {
+    try {
+      const info = await FileSystem.getInfoAsync(THUMBNAILS_FILE);
+      if (info.exists) {
+        return await FileSystem.readAsStringAsync(THUMBNAILS_FILE);
+      }
+    } catch (e) {
+      console.warn('Native read thumbnails error:', e);
     }
   }
   return null;

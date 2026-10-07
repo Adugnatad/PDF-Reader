@@ -21,6 +21,7 @@ import {
   openAllFilesAccessSettings,
 } from "../services/nativeFilePicker";
 import { isUuidOrHash, resolvePdfDisplayName } from "../utils/pdfNameResolver";
+import { PdfThumbnailPreview } from "./PdfThumbnailPreview";
 
 interface FilesHomeScreenProps {
   files: DocFile[];
@@ -506,16 +507,11 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
                   style={styles.fileCard}
                   activeOpacity={0.7}
                 >
-                  {/* Red PDF Badge */}
-                  <View style={styles.typeBadge}>
-                    <Text style={styles.badgeLabel}>PDF</Text>
-                    <MaterialIcons
-                      name="picture-as-pdf"
-                      size={16}
-                      color="#ff516a"
-                      style={styles.badgeIcon}
-                    />
-                  </View>
+                  {/* Real PDF Document Page Preview */}
+                  <PdfThumbnailPreview
+                    fileId={file.id}
+                    fileName={displayName}
+                  />
 
                   {/* Document Information */}
                   <View style={styles.fileDetails}>

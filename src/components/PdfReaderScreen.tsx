@@ -36,6 +36,7 @@ import {
   saveViewModeSettings,
   loadViewModeSettings,
 } from "../services/storageHelper";
+import { pdfThumbnailService } from "../services/pdfThumbnailService";
 
 interface PdfReaderScreenProps {
   onBack: () => void;
@@ -411,6 +412,9 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                 .promise;
               if (!isMounted) return;
               generated[i] = thumbCanvas.toDataURL();
+              if (i === 1 && docId && generated[1]) {
+                pdfThumbnailService.saveThumbnail(docId, generated[1]);
+              }
             }
           }
         } catch {
