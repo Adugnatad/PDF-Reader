@@ -73,7 +73,13 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
 
       setIsScanning(true);
       try {
-        await pdfStore.scanDeviceOnceAfterPermission();
+        const timeoutPromise = new Promise<void>((resolve) =>
+          setTimeout(resolve, 8000),
+        );
+        await Promise.race([
+          pdfStore.scanDeviceOnceAfterPermission(),
+          timeoutPromise,
+        ]);
         setDeviceFiles(pdfStore.getAllFiles());
       } catch (error) {
         console.warn("Could not perform initial device scan:", error);
@@ -158,19 +164,29 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
     setIsScanning(true);
 
     try {
-      if (Platform.OS === "android") {
-        if (Number(Platform.Version) < 30) {
-          const safItems = await promptAndScanDeviceStorage();
-          if (safItems.length > 0)
-            pdfStore.registerDiscoveredDevicePdfs(safItems);
+      onShowToast("Scanning device for PDF documents...");
+      const initialCount = pdfStore.getUserFiles().length;
+
+      // 1. Scan device storage automatically
+      const timeoutPromise = new Promise<void>((resolve) =>
+        setTimeout(resolve, 10000),
+      );
+      await Promise.race([
+        pdfStore.scanDeviceAutomatically(),
+        timeoutPromise,
+      ]);
+
+      let currentFiles = pdfStore.getAllFiles();
+
+      // 2. If 0 files found on Android, prompt SAF folder picker
+      if (currentFiles.length === 0 && Platform.OS === "android") {
+        const safItems = await promptAndScanDeviceStorage();
+        if (safItems && safItems.length > 0) {
+          pdfStore.registerDiscoveredDevicePdfs(safItems);
+          currentFiles = pdfStore.getAllFiles();
         }
       }
 
-      onShowToast("Scanning device for PDF documents...");
-      const initialCount = pdfStore.getUserFiles().length;
-      await pdfStore.scanDeviceAutomatically();
-
-      const currentFiles = pdfStore.getAllFiles();
       setDeviceFiles(currentFiles);
 
       if (currentFiles.length > initialCount) {

@@ -646,8 +646,8 @@ class PdfStoreService {
    * Automatically resolves and updates actual page counts for all files in the background.
    */
   public async resolveMissingPageCounts(): Promise<void> {
-    let anyChanged = false;
-    for (const f of [...this.userFiles]) {
+    const uncounted = this.userFiles.filter((f) => !f.pageCount).slice(0, 5);
+    for (const f of uncounted) {
       const uri = this.nativeUriMap.get(f.id) || this.nativeUriMap.get(f.name);
       if (uri) {
         try {
@@ -655,15 +655,11 @@ class PdfStoreService {
           if (bytes) {
             const info = await extractPdfInfoFromBytesAsync(bytes);
             if (info.pageCount && info.pageCount > 0 && info.pageCount !== f.pageCount) {
-              const updated = this.updatePageCount(f.id, info.pageCount);
-              if (updated) anyChanged = true;
+              this.updatePageCount(f.id, info.pageCount);
             }
           }
         } catch {}
       }
-    }
-    if (anyChanged) {
-      this.notify();
     }
   }
 

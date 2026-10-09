@@ -1,4 +1,4 @@
-import { NativeModules, Platform } from "react-native";
+import { Linking, NativeModules, Platform } from "react-native";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import ReactNativeBlobUtil from "react-native-blob-util";
@@ -41,14 +41,27 @@ const allFilesAccess = NativeModules.AllFilesAccess as
 
 export async function hasAllFilesAccess(): Promise<boolean> {
   if (Platform.OS !== "android") return true;
-  return (await allFilesAccess?.hasAllFilesAccess()) ?? false;
+  if (allFilesAccess?.hasAllFilesAccess) {
+    try {
+      return await allFilesAccess.hasAllFilesAccess();
+    } catch {}
+  }
+  return true;
 }
 
 export async function openAllFilesAccessSettings(): Promise<void> {
   if (Platform.OS !== "android") return;
-  if (!allFilesAccess)
-    throw new Error("Android all-files access module is unavailable");
-  await allFilesAccess.openAllFilesAccessSettings();
+  if (allFilesAccess?.openAllFilesAccessSettings) {
+    try {
+      await allFilesAccess.openAllFilesAccessSettings();
+      return;
+    } catch {}
+  }
+  try {
+    await Linking.openSettings();
+  } catch (err) {
+    console.warn("Could not open settings:", err);
+  }
 }
 
 function base64ToArrayBuffer(base64: string): ArrayBuffer {
@@ -99,8 +112,12 @@ async function scanSafDirectory(
 ): Promise<void> {
   if (Platform.OS !== "android" || !FileSystem.StorageAccessFramework) return;
   try {
-    const files =
-      await FileSystem.StorageAccessFramework.readDirectoryAsync(dirUri);
+    const files = await Promise.race([
+      FileSystem.StorageAccessFramework.readDirectoryAsync(dirUri),
+      new Promise<string[]>((_, reject) =>
+        setTimeout(() => reject(new Error("SAF readDirectory timeout")), 4000),
+      ),
+    ]);
     for (const fileUri of files) {
       const decoded = decodeURIComponent(fileUri);
       if (!decoded.toLowerCase().endsWith(".pdf")) continue;
@@ -137,17 +154,6 @@ async function scanSafDirectory(
 
       registerKnownPdfName(fileUri, realName);
 
-      let pageCount = 1;
-      try {
-        const bytes = await readNativePdfBytes(fileUri);
-        if (bytes) {
-          const info = await extractPdfInfoFromBytesAsync(bytes);
-          if (info.pageCount && info.pageCount > 0) {
-            pageCount = info.pageCount;
-          }
-        }
-      } catch {}
-
       discovered.push({
         id: `saf-${fileUri}`,
         name: realName,
@@ -155,7 +161,7 @@ async function scanSafDirectory(
         uri: fileUri,
         lastModified,
         folder: "Documents",
-        pageCount,
+        pageCount: 1,
       });
     }
   } catch (err) {
@@ -230,8 +236,45 @@ export async function readNativePdfBytes(
   return null;
 }
 
+const SKIP_DIR_REGEX =
+  /^(android|data|obb|dcim|camera|pictures|photos|movies|music|audio|podcasts|ringtones|alarms|notifications|\.thumbnails|\.trashed|lost\+found|cache|tmp|node_modules|miui|tencent|\.git)$/i;
+
+const NON_DOC_EXTENSIONS =
+  /\.(jpe?g|png|gif|webp|bmp|svg|mp4|mkv|mov|avi|wmv|mp3|wav|ogg|flac|m4a|aac|zip|rar|7z|tar|gz|apk|exe|bin|iso|dmg)$/i;
+
+async function safeLstat(
+  dirPath: string,
+  timeoutMs = 2500,
+): Promise<any[] | null> {
+  try {
+    const lstatPromise = ReactNativeBlobUtil.fs.lstat(dirPath);
+    const timeout = new Promise<null>((resolve) =>
+      setTimeout(() => resolve(null), timeoutMs),
+    );
+    return await Promise.race([lstatPromise, timeout]);
+  } catch {
+    return null;
+  }
+}
+
+async function safeLs(
+  dirPath: string,
+  timeoutMs = 2000,
+): Promise<string[] | null> {
+  try {
+    const lsPromise = ReactNativeBlobUtil.fs.ls(dirPath);
+    const timeout = new Promise<null>((resolve) =>
+      setTimeout(() => resolve(null), timeoutMs),
+    );
+    return await Promise.race([lsPromise, timeout]);
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Recursively scans an Android directory up to maxDepth levels
+ * Recursively scans a targeted Android directory up to maxDepth levels.
+ * Leverages native batch lstat for near-instantaneous discovery without bridge saturation.
  */
 async function scanDirectoryRecursive(
   dirPath: string,
@@ -243,20 +286,105 @@ async function scanDirectoryRecursive(
 ): Promise<void> {
   if (depth > maxDepth) return;
   const cleanDir = dirPath.replace(/\/+$/, "");
-  if (visitedDirs.has(cleanDir)) return;
+  if (!cleanDir || visitedDirs.has(cleanDir)) return;
   visitedDirs.add(cleanDir);
 
+  // 1. First try fast batch lstat (returns name, type, size, lastModified in ONE call)
   try {
-    const files = await ReactNativeBlobUtil.fs.ls(cleanDir);
+    const stats = await safeLstat(cleanDir, 2500);
+    if (stats && Array.isArray(stats) && stats.length > 0) {
+      const subdirs: string[] = [];
+
+      for (const item of stats) {
+        const itemName = item.filename || item.path?.split("/").pop() || "";
+        if (!itemName || itemName.startsWith(".")) continue;
+
+        if (item.type === "directory") {
+          if (
+            SKIP_DIR_REGEX.test(itemName) ||
+            itemName.toLowerCase().includes("cache")
+          ) {
+            continue;
+          }
+          if (depth < maxDepth) {
+            subdirs.push(item.path || `${cleanDir}/${itemName}`);
+          }
+        } else {
+          // File
+          if (itemName.toLowerCase().endsWith(".pdf")) {
+            const rawSize = item.size;
+            const size =
+              typeof rawSize === "string"
+                ? parseInt(rawSize, 10)
+                : rawSize || 0;
+            if (size <= 10) continue;
+
+            const realName = cleanDocumentName(itemName);
+            const fullPath = item.path || `${cleanDir}/${itemName}`;
+            const fileUri = `file://${fullPath}`;
+            if (!realName || isJunkDocument(realName, fileUri)) continue;
+
+            const isDuplicate = discovered.some(
+              (d) =>
+                d.uri === fileUri ||
+                (d.name.toLowerCase() === realName.toLowerCase() &&
+                  Math.abs(d.size - size) < 1024),
+            );
+            if (isDuplicate) continue;
+
+            registerKnownPdfName(fileUri, realName);
+
+            discovered.push({
+              id: `native-${fullPath}`,
+              name: realName,
+              size,
+              uri: fileUri,
+              lastModified: item.lastModified
+                ? Number(item.lastModified)
+                : undefined,
+              folder,
+              pageCount: 1,
+            });
+          }
+        }
+      }
+
+      // Recurse into subdirectories
+      for (const subdir of subdirs) {
+        const childFolder =
+          /download/i.test(subdir)
+            ? "Downloads"
+            : /book/i.test(subdir)
+              ? "Books"
+              : /scan/i.test(subdir)
+                ? "Scans"
+                : folder;
+        await scanDirectoryRecursive(
+          subdir,
+          childFolder,
+          depth + 1,
+          maxDepth,
+          visitedDirs,
+          discovered,
+        );
+      }
+      return;
+    }
+  } catch {
+    // Fall back to safeLs below
+  }
+
+  // 2. Fallback: safeLs
+  try {
+    const files = await safeLs(cleanDir, 2000);
     if (!files || !Array.isArray(files)) return;
+
+    const subdirs: string[] = [];
 
     for (const item of files) {
       if (!item || item.startsWith(".")) continue;
-      // Skip system, trash, and thumbnail folders
       if (
-        item === "lost+found" ||
-        item === ".trashed" ||
-        item === "thumbnails" ||
+        SKIP_DIR_REGEX.test(item) ||
         item.toLowerCase().includes("cache")
       ) {
         continue;
@@ -265,86 +393,76 @@ async function scanDirectoryRecursive(
       const fullPath = `${cleanDir}/${item}`;
       if (/\/Android\/(data|obb)(\/|$)/i.test(fullPath)) continue;
 
-      const childFolder =
-        depth === 1
-          ? /download/i.test(item)
-            ? "Downloads"
-            : /book/i.test(item)
-              ? "Books"
-              : /scan/i.test(item)
-                ? "Scans"
-                : folder
-          : folder;
-      try {
-        const itemIsDir = await ReactNativeBlobUtil.fs.isDir(fullPath);
+      if (item.toLowerCase().endsWith(".pdf")) {
+        const fileUri = `file://${fullPath}`;
+        let size = 0;
+        let lastModified: number | undefined;
+        try {
+          const stat = await ReactNativeBlobUtil.fs.stat(fullPath);
+          size =
+            typeof stat.size === "string"
+              ? parseInt(stat.size, 10)
+              : stat.size || 0;
+          lastModified = stat.lastModified
+            ? Number(stat.lastModified)
+            : undefined;
+        } catch {}
+
+        if (size <= 10) continue;
+        const realName = cleanDocumentName(item);
+        if (!realName || isJunkDocument(realName, fileUri)) continue;
+
+        const isDuplicate = discovered.some(
+          (d) =>
+            d.uri === fileUri ||
+            (d.name.toLowerCase() === realName.toLowerCase() &&
+              Math.abs(d.size - size) < 1024),
+        );
+        if (isDuplicate) continue;
+
+        registerKnownPdfName(fileUri, realName);
+
+        discovered.push({
+          id: `native-${fullPath}`,
+          name: realName,
+          size,
+          uri: fileUri,
+          lastModified,
+          folder,
+          pageCount: 1,
+        });
+      } else if (depth < maxDepth && !NON_DOC_EXTENSIONS.test(item)) {
+        // Fast probe: only check isDir if it's not a known file extension
+        const itemIsDir = await Promise.race([
+          ReactNativeBlobUtil.fs.isDir(fullPath),
+          new Promise<boolean>((resolve) =>
+            setTimeout(() => resolve(false), 500),
+          ),
+        ]).catch(() => false);
+
         if (itemIsDir) {
-          // Recurse into subfolder (e.g. Documents/Documents)
-          await scanDirectoryRecursive(
-            fullPath,
-            childFolder,
-            depth + 1,
-            maxDepth,
-            visitedDirs,
-            discovered,
-          );
-        } else if (item.toLowerCase().endsWith(".pdf")) {
-          // Found PDF file on device
-          const fileUri = `file://${fullPath}`;
-
-          let size = 0;
-          let lastModified: number | undefined;
-          try {
-            const stat = await ReactNativeBlobUtil.fs.stat(fullPath);
-            size = stat.size || 0;
-            lastModified = stat.lastModified;
-          } catch {
-            // ignore
-          }
-
-          // Filter out empty or corrupted 0/1 byte temp files
-          if (size <= 10) continue;
-
-          // Preserve the authentic name of the file on disk!
-          const realName = cleanDocumentName(item);
-          if (!realName || isJunkDocument(realName, fileUri)) {
-            continue;
-          }
-
-          // Deduplication: check if already discovered by canonical URI or by name + size
-          const isDuplicate = discovered.some(
-            (d) =>
-              d.uri === fileUri ||
-              (d.name.toLowerCase() === realName.toLowerCase() &&
-                Math.abs(d.size - size) < 1024),
-          );
-          if (isDuplicate) continue;
-
-          registerKnownPdfName(fileUri, realName);
-
-          let pageCount = 1;
-          try {
-            const bytes = await readNativePdfBytes(fileUri);
-            if (bytes) {
-              const info = await extractPdfInfoFromBytesAsync(bytes);
-              if (info.pageCount && info.pageCount > 0) {
-                pageCount = info.pageCount;
-              }
-            }
-          } catch {}
-
-          discovered.push({
-            id: `native-${fullPath}`,
-            name: realName,
-            size,
-            uri: fileUri,
-            lastModified,
-            folder,
-            pageCount,
-          });
+          subdirs.push(fullPath);
         }
-      } catch {
-        // Individual item read error, continue
       }
+    }
+
+    for (const subdir of subdirs) {
+      const childFolder =
+        /download/i.test(subdir)
+          ? "Downloads"
+          : /book/i.test(subdir)
+            ? "Books"
+            : /scan/i.test(subdir)
+              ? "Scans"
+              : folder;
+      await scanDirectoryRecursive(
+        subdir,
+        childFolder,
+        depth + 1,
+        maxDepth,
+        visitedDirs,
+        discovered,
+      );
     }
   } catch {
     // Directory listing failed or not permitted, continue
@@ -353,118 +471,144 @@ async function scanDirectoryRecursive(
 
 /**
  * Automatically scans device filesystem for authentic user PDF documents.
- * Discovers PDFs in Downloads, Documents, nested subfolders (e.g. Documents/Documents), SDCard, and app storage.
- * Explicitly ignores internal temp cache directories and purges legacy junk files.
+ * Discovers PDFs in Downloads, Documents, PDF, Books, SDCard, storage root, and app storage.
  */
 export async function autoScanDevicePdfs(): Promise<DiscoveredPdfItem[]> {
   const discovered: DiscoveredPdfItem[] = [];
+  const scanTask = internalAutoScanDevicePdfs(discovered);
+  const timeoutPromise = new Promise<DiscoveredPdfItem[]>((resolve) =>
+    setTimeout(() => resolve(discovered), 10000),
+  );
+  return Promise.race([scanTask, timeoutPromise]);
+}
+
+async function internalAutoScanDevicePdfs(
+  discovered: DiscoveredPdfItem[] = [],
+): Promise<DiscoveredPdfItem[]> {
   const visitedDirs = new Set<string>();
 
   try {
-    // Scan via a previously selected StorageAccessFramework directory
+    // 1. Scan via a previously selected StorageAccessFramework directory
     const savedSafUri = await getSavedSafDirectoryUri();
     if (savedSafUri) {
       await scanSafDirectory(savedSafUri, discovered);
     }
 
-    // Scan shared storage only after Android grants all-files access.
-    if (Platform.OS === "android" && (await hasAllFilesAccess())) {
-      const rootCandidates: Array<{
+    // 2. Scan Android document, download, and storage locations
+    if (Platform.OS === "android") {
+      const targetDirs: Array<{
         path: string;
         folder: "Downloads" | "Documents" | "Scans" | "Books";
+        maxDepth: number;
       }> = [];
 
       try {
         const fsDirs = ReactNativeBlobUtil.fs.dirs;
+        if (fsDirs.DownloadDir) {
+          targetDirs.push({
+            path: fsDirs.DownloadDir,
+            folder: "Downloads",
+            maxDepth: 6,
+          });
+        }
+        if (fsDirs.DocumentDir) {
+          targetDirs.push({
+            path: fsDirs.DocumentDir,
+            folder: "Documents",
+            maxDepth: 6,
+          });
+        }
+        if (fsDirs.SDCardDir) {
+          targetDirs.push({
+            path: fsDirs.SDCardDir,
+            folder: "Documents",
+            maxDepth: 6,
+          });
+        }
         if ((fsDirs as any).LegacyDownloadDir) {
-          rootCandidates.push({
+          targetDirs.push({
             path: (fsDirs as any).LegacyDownloadDir,
             folder: "Downloads",
+            maxDepth: 6,
           });
         }
         if ((fsDirs as any).LegacySDCardDir) {
-          rootCandidates.push({
-            path: `${(fsDirs as any).LegacySDCardDir}/Documents`,
-            folder: "Documents",
-          });
-          rootCandidates.push({
-            path: `${(fsDirs as any).LegacySDCardDir}/Documents/Documents`,
-            folder: "Documents",
-          });
-          rootCandidates.push({
+          targetDirs.push({
             path: `${(fsDirs as any).LegacySDCardDir}/Download`,
             folder: "Downloads",
+            maxDepth: 6,
           });
-          rootCandidates.push({
+          targetDirs.push({
             path: `${(fsDirs as any).LegacySDCardDir}/Downloads`,
             folder: "Downloads",
+            maxDepth: 6,
           });
-          rootCandidates.push({
+          targetDirs.push({
+            path: `${(fsDirs as any).LegacySDCardDir}/Documents`,
+            folder: "Documents",
+            maxDepth: 6,
+          });
+          targetDirs.push({
             path: `${(fsDirs as any).LegacySDCardDir}/PDF`,
             folder: "Documents",
-          });
-          rootCandidates.push({
-            path: `${(fsDirs as any).LegacySDCardDir}/Books`,
-            folder: "Books",
+            maxDepth: 6,
           });
         }
       } catch {
         // ignore
       }
 
-      // Explicit Android mount points
-      rootCandidates.push({ path: "/storage/emulated/0", folder: "Documents" });
-      rootCandidates.push({
-        path: "/storage/emulated/0/Documents/Documents",
-        folder: "Documents",
-      });
-      rootCandidates.push({
-        path: "/storage/emulated/0/Documents",
-        folder: "Documents",
-      });
-      rootCandidates.push({
-        path: "/storage/emulated/0/Download/Documents",
-        folder: "Documents",
-      });
-      rootCandidates.push({
+      // Explicit Android document & download locations
+      targetDirs.push({
         path: "/storage/emulated/0/Download",
         folder: "Downloads",
+        maxDepth: 6,
       });
-      rootCandidates.push({
+      targetDirs.push({
         path: "/storage/emulated/0/Downloads",
         folder: "Downloads",
+        maxDepth: 6,
       });
-      rootCandidates.push({
+      targetDirs.push({
+        path: "/storage/emulated/0/Documents",
+        folder: "Documents",
+        maxDepth: 6,
+      });
+      targetDirs.push({
         path: "/storage/emulated/0/PDF",
         folder: "Documents",
+        maxDepth: 6,
       });
-      rootCandidates.push({
+      targetDirs.push({
         path: "/storage/emulated/0/Books",
         folder: "Books",
+        maxDepth: 6,
       });
-      rootCandidates.push({
-        path: "/sdcard/Documents/Documents",
+      // User root storage crawl (finds PDFs anywhere in device storage root)
+      targetDirs.push({
+        path: "/storage/emulated/0",
         folder: "Documents",
+        maxDepth: 6,
       });
-      rootCandidates.push({ path: "/sdcard/Documents", folder: "Documents" });
-      rootCandidates.push({ path: "/sdcard/Download", folder: "Downloads" });
-      rootCandidates.push({ path: "/sdcard/Downloads", folder: "Downloads" });
+      targetDirs.push({ path: "/sdcard/Download", folder: "Downloads", maxDepth: 6 });
+      targetDirs.push({ path: "/sdcard/Downloads", folder: "Downloads", maxDepth: 6 });
+      targetDirs.push({ path: "/sdcard/Documents", folder: "Documents", maxDepth: 6 });
+      targetDirs.push({ path: "/sdcard", folder: "Documents", maxDepth: 6 });
 
-      for (const { path, folder } of rootCandidates) {
+      for (const { path, folder, maxDepth } of targetDirs) {
         if (!path) continue;
         await scanDirectoryRecursive(
           path,
           folder,
           1,
-          32,
+          maxDepth,
           visitedDirs,
           discovered,
         );
       }
     }
 
-    // Scan permanent app document storage for non-temporary user PDF files
-    // NOTE: PURGE ANY LEGACY JUNK FILES (expo-file, Document.pdf, device-pdf) from disk!
+    // 3. Scan permanent app document storage for non-temporary user PDF files
     if (FileSystem.documentDirectory) {
       try {
         const appFiles = await FileSystem.readDirectoryAsync(
@@ -476,10 +620,11 @@ export async function autoScanDevicePdfs(): Promise<DiscoveredPdfItem[]> {
             file.startsWith(".") ||
             file.endsWith(".json") ||
             file.endsWith(".txt")
-          )
+          ) {
             continue;
+          }
 
-          // PURGE LEGACY JUNK CACHE FILES FROM PERMANENT APP STORAGE!
+          // Purge legacy junk cache files
           if (isJunkDocument(file)) {
             try {
               await FileSystem.deleteAsync(
@@ -500,9 +645,7 @@ export async function autoScanDevicePdfs(): Promise<DiscoveredPdfItem[]> {
                 size = (info as any).size || 0;
                 lastModified = (info as any).modificationTime;
               }
-            } catch {
-              // ignore
-            }
+            } catch {}
 
             if (size <= 10) continue;
 
@@ -519,17 +662,6 @@ export async function autoScanDevicePdfs(): Promise<DiscoveredPdfItem[]> {
 
             registerKnownPdfName(fileUri, realName);
 
-            let pageCount = 1;
-            try {
-              const bytes = await readNativePdfBytes(fileUri);
-              if (bytes) {
-                const info = await extractPdfInfoFromBytesAsync(bytes);
-                if (info.pageCount && info.pageCount > 0) {
-                  pageCount = info.pageCount;
-                }
-              }
-            } catch {}
-
             discovered.push({
               id: `app-doc-${file}`,
               name: realName,
@@ -537,7 +669,7 @@ export async function autoScanDevicePdfs(): Promise<DiscoveredPdfItem[]> {
               uri: fileUri,
               lastModified,
               folder: "Documents",
-              pageCount,
+              pageCount: 1,
             });
           }
         }
@@ -694,16 +826,13 @@ export async function scanDeviceStorage(): Promise<PickedFileResult[]> {
     const autoDiscovered = await autoScanDevicePdfs();
     const results: PickedFileResult[] = [];
     for (const item of autoDiscovered) {
-      const buffer = await readNativePdfBytes(item.uri);
-      if (buffer) {
-        results.push({
-          name: item.name,
-          size: item.size || buffer.byteLength,
-          buffer,
-          uri: item.uri,
-          pageCount: item.pageCount,
-        });
-      }
+      results.push({
+        name: item.name,
+        size: item.size || 0,
+        buffer: new ArrayBuffer(0),
+        uri: item.uri,
+        pageCount: item.pageCount || 1,
+      });
     }
     return results;
   } catch (err) {

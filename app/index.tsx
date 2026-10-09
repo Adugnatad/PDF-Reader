@@ -18,7 +18,6 @@ export default function IndexScreen() {
   const router = useRouter();
   const { showToast } = useToast();
   const [allFiles, setAllFiles] = useState<DocFile[]>(() => pdfStore.getUserFiles());
-  const [isDiscoveringFiles, setIsDiscoveringFiles] = useState(true);
 
   useEffect(() => {
     const unsubscribe = pdfStore.subscribe(() => {
@@ -32,28 +31,34 @@ export default function IndexScreen() {
     let isMounted = true;
 
     const discoverFilesOnStartup = async () => {
-      const needsAndroidPermission =
-        Platform.OS === 'android' && Number(Platform.Version) >= 30;
-      let hasAccess = false;
-
-      if (needsAndroidPermission) {
-        try {
-          hasAccess = await hasAllFilesAccess();
-        } catch (error) {
-          console.warn('Could not check file access before discovery:', error);
-        }
-      }
-
       try {
-        if (hasAccess) {
-          await pdfStore.scanDeviceOnceAfterPermission();
-        } else {
-          await pdfStore.scanDeviceAutomatically();
-        }
+        const timeoutPromise = new Promise<void>((resolve) =>
+          setTimeout(resolve, 8000)
+        );
+
+        const scanTask = (async () => {
+          const needsAndroidPermission =
+            Platform.OS === 'android' && Number(Platform.Version) >= 30;
+          let hasAccess = false;
+
+          if (needsAndroidPermission) {
+            try {
+              hasAccess = await hasAllFilesAccess();
+            } catch (error) {
+              console.warn('Could not check file access before discovery:', error);
+            }
+          }
+
+          if (hasAccess) {
+            await pdfStore.scanDeviceOnceAfterPermission();
+          } else {
+            await pdfStore.scanDeviceAutomatically();
+          }
+        })();
+
+        await Promise.race([scanTask, timeoutPromise]);
       } catch (error) {
-        console.warn('Could not complete startup file discovery:', error);
-      } finally {
-        if (isMounted) setIsDiscoveringFiles(false);
+        console.warn('Startup file discovery note:', error);
       }
     };
 
@@ -77,26 +82,6 @@ export default function IndexScreen() {
       });
     }
   };
-
-  if (isDiscoveringFiles) {
-    return (
-      <View style={styles.splash}>
-        <View style={styles.splashIcon}>
-          <MaterialIcons name="picture-as-pdf" size={34} color="#ff516a" />
-        </View>
-        <Text style={styles.splashTitle}>DocuFlow</Text>
-        <Text style={styles.splashMessage}>
-          Finding PDF documents on your device
-        </Text>
-        <ActivityIndicator
-          style={styles.splashSpinner}
-          size="small"
-          color="#7bd0ff"
-          accessibilityLabel="Discovering PDF documents"
-        />
-      </View>
-    );
-  }
 
   return (
     <FilesHomeScreen

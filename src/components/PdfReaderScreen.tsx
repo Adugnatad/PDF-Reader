@@ -430,10 +430,12 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
         try {
           if (Platform.OS === "web" && typeof document !== "undefined") {
             const page = await pdfDoc.getPage(i);
-            const thumbViewport = page?.getViewport({ scale: 0.22, rotation });
+            if (!page) continue;
+            const thumbViewport = page?.getViewport ? page.getViewport({ scale: 0.22, rotation }) : null;
+            if (!thumbViewport || typeof thumbViewport.width !== "number" || typeof thumbViewport.height !== "number") continue;
             const thumbCanvas = document.createElement("canvas");
-            thumbCanvas.width = Math.floor(thumbViewport?.width || 120);
-            thumbCanvas.height = Math.floor(thumbViewport?.height || 160);
+            thumbCanvas.width = Math.floor(thumbViewport.width || 120);
+            thumbCanvas.height = Math.floor(thumbViewport.height || 160);
             const ctx = thumbCanvas.getContext("2d");
             if (ctx) {
               await page.render({ canvasContext: ctx, viewport: thumbViewport })
@@ -599,7 +601,9 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
 
         try {
           const page = await pdfDoc.getPage(p);
-          const viewport = page.getViewport({ scale: zoom * 0.9, rotation });
+          if (!page) continue;
+          const viewport = page?.getViewport ? page.getViewport({ scale: zoom * 0.9, rotation }) : null;
+          if (!viewport || typeof viewport.width !== "number" || typeof viewport.height !== "number") continue;
           const pixelRatio =
             (typeof window !== "undefined" && window.devicePixelRatio) || 1;
 
