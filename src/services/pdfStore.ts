@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 import { DocFile } from '../types';
 import {
   generateTaxFilingPdf,
@@ -449,8 +450,22 @@ class PdfStoreService {
     }
 
     // 3. Check if we have a native URI for this file on device
-    const nativeUri = this.nativeUriMap.get(docIdOrTitle);
+    const nativeUri =
+      this.nativeUriMap.get(docIdOrTitle) ||
+      this.nativeUriMap.get(docIdOrTitle.toLowerCase());
     if (nativeUri) {
+      const storedName = docIdOrTitle.split("/").pop() || docIdOrTitle;
+      if (Platform.OS !== "web") {
+        // Native mobile streams directly from disk via nativeUri!
+        // Never load large files into JS memory as Base64 to prevent Android 256MB heap crash
+        return {
+          data: new Uint8Array(0),
+          name: storedName,
+          id: docIdOrTitle,
+          nativeUri,
+        };
+      }
+
       const bytes = await readNativePdfBytes(nativeUri);
       if (bytes && !isBufferDetached(bytes)) {
         const safeBytes = cloneBufferSafe(bytes);
@@ -463,12 +478,11 @@ class PdfStoreService {
           }
         } catch {}
 
-        const storedName = docIdOrTitle.split('/').pop() || docIdOrTitle;
         const stored: StoredPdf = {
           id: docIdOrTitle,
           name: storedName,
           data: cloneBufferSafe(safeBytes),
-          uploadedAt: 'Device',
+          uploadedAt: "Device",
           pageCount,
           nativeUri,
         };
@@ -481,6 +495,14 @@ class PdfStoreService {
           nativeUri,
         };
       }
+
+      // If file is too large to load into memory or on web fallback, still return nativeUri
+      return {
+        data: new Uint8Array(0),
+        name: storedName,
+        id: docIdOrTitle,
+        nativeUri,
+      };
     }
 
     // 4. Match known generators or generate authentic dynamic PDF

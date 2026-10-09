@@ -169,29 +169,56 @@ async function scanSafDirectory(
   }
 }
 
+export const MAX_SAFE_BUFFER_BYTES = 25 * 1024 * 1024; // 25 MB safety limit
+
 /**
- * Reads binary ArrayBuffer from a native device file URI or absolute path
+ * Reads binary ArrayBuffer from a native device file URI or absolute path.
+ * Enforces memory safety checks to prevent Android OutOfMemory crashes on large files.
  */
 export async function readNativePdfBytes(
   fileUriOrPath: string,
 ): Promise<ArrayBuffer | null> {
-  // 1. Content URI (SAF on Android)
-  if (fileUriOrPath.startsWith("content://")) {
-    try {
-      const base64 = await FileSystem.readAsStringAsync(fileUriOrPath, {
-        encoding: "base64" as any,
-      });
-      if (base64) {
-        return base64ToArrayBuffer(base64);
-      }
-    } catch {
-      // fallback
-    }
-  }
-
   const cleanPath = fileUriOrPath.replace("file://", "");
 
-  // 2. Try ReactNativeBlobUtil
+  // 1. Check file size first: Never load large files (> 25MB) into JS Base64 memory
+  try {
+    let fileSize = 0;
+    try {
+      const stat = await ReactNativeBlobUtil.fs.stat(cleanPath);
+      fileSize =
+        typeof stat.size === "string" ? parseInt(stat.size, 10) : stat.size || 0;
+    } catch {
+      try {
+        const info = await FileSystem.getInfoAsync(fileUriOrPath);
+        fileSize = (info as any).size || 0;
+      } catch {}
+    }
+
+    if (fileSize > MAX_SAFE_BUFFER_BYTES) {
+      console.warn(
+        `[Memory Guard] Skipping in-memory Base64 read of large file (${(
+          fileSize /
+          (1024 * 1024)
+        ).toFixed(1)} MB). Native streaming from disk is used.`
+      );
+      return null;
+    }
+  } catch {}
+
+  // 2. Try fetch first (streams directly into native binary ArrayBuffer without huge Java Base64 string)
+  try {
+    const fetchUri =
+      fileUriOrPath.startsWith("file://") ||
+      fileUriOrPath.startsWith("content://")
+        ? fileUriOrPath
+        : `file://${cleanPath}`;
+    const res = await fetch(fetchUri);
+    if (res.ok) {
+      return await res.arrayBuffer();
+    }
+  } catch {}
+
+  // 3. For small files only (<= 25MB), fallback to ReactNativeBlobUtil
   try {
     const exists = await ReactNativeBlobUtil.fs.exists(cleanPath);
     if (exists) {
@@ -200,37 +227,18 @@ export async function readNativePdfBytes(
         return base64ToArrayBuffer(base64);
       }
     }
-  } catch {
-    // fallback
-  }
+  } catch {}
 
-  // 3. Try fetch
-  try {
-    const res = await fetch(
-      fileUriOrPath.startsWith("file://")
-        ? fileUriOrPath
-        : `file://${cleanPath}`,
-    );
-    if (res.ok) {
-      return await res.arrayBuffer();
-    }
-  } catch {
-    // fallback
-  }
-
-  // 4. Try FileSystem
-  try {
-    const uri = fileUriOrPath.startsWith("file://")
-      ? fileUriOrPath
-      : `file://${cleanPath}`;
-    const base64 = await FileSystem.readAsStringAsync(uri, {
-      encoding: "base64" as any,
-    });
-    if (base64) {
-      return base64ToArrayBuffer(base64);
-    }
-  } catch {
-    // failed
+  // 4. Content URI fallback for small files
+  if (fileUriOrPath.startsWith("content://")) {
+    try {
+      const base64 = await FileSystem.readAsStringAsync(fileUriOrPath, {
+        encoding: "base64" as any,
+      });
+      if (base64) {
+        return base64ToArrayBuffer(base64);
+      }
+    } catch {}
   }
 
   return null;
@@ -756,29 +764,40 @@ export async function pickPdfFromDevice(): Promise<PickedFileResult | null> {
     }
 
     const name = cleanDocumentName(rawName || "Document.pdf");
+    const assetSize = asset.size || 0;
     let buffer: ArrayBuffer | null = null;
 
-    try {
-      const response = await fetch(asset.uri);
-      buffer = await response.arrayBuffer();
-    } catch {
+    // For files within safe memory limits (<= 25MB), load buffer for metadata
+    if (assetSize <= MAX_SAFE_BUFFER_BYTES) {
       try {
-        const base64 = await FileSystem.readAsStringAsync(asset.uri, {
-          encoding: "base64" as any,
-        });
-        buffer = base64ToArrayBuffer(base64);
-      } catch (err) {
-        console.error("Error reading native file URI:", err);
+        const response = await fetch(asset.uri);
+        buffer = await response.arrayBuffer();
+      } catch {
+        try {
+          const base64 = await FileSystem.readAsStringAsync(asset.uri, {
+            encoding: "base64" as any,
+          });
+          buffer = base64ToArrayBuffer(base64);
+        } catch (err) {
+          console.error("Error reading native file URI:", err);
+        }
       }
+    } else {
+      // Large file (> 25MB): Stream directly from disk!
+      // Do not load into JS memory / Base64 to prevent Android 256MB heap crash
+      console.warn(
+        `[Memory Guard] Picked file is ${(assetSize / (1024 * 1024)).toFixed(
+          1
+        )} MB. Streaming directly from disk without in-memory Base64.`
+      );
+      buffer = new ArrayBuffer(0);
     }
 
     if (!buffer) {
-      throw new Error(
-        "Unable to read selected PDF file data from native device",
-      );
+      buffer = new ArrayBuffer(0);
     }
 
-    // Copy to permanent documentDirectory under its real authentic filename
+    // Copy to permanent documentDirectory under its real authentic filename via native disk stream
     let permanentUri = asset.uri;
     if (
       FileSystem.documentDirectory &&
@@ -796,7 +815,7 @@ export async function pickPdfFromDevice(): Promise<PickedFileResult | null> {
     }
 
     let pageCount: number | undefined;
-    if (buffer) {
+    if (buffer && buffer.byteLength > 0) {
       const info = await extractPdfInfoFromBytesAsync(buffer);
       pageCount = info.pageCount;
     }
@@ -806,10 +825,10 @@ export async function pickPdfFromDevice(): Promise<PickedFileResult | null> {
 
     return {
       name,
-      size: asset.size || buffer.byteLength,
+      size: assetSize || buffer.byteLength,
       buffer,
       uri: permanentUri,
-      pageCount,
+      pageCount: pageCount || 1,
     };
   } catch (err) {
     console.error("Native document picker error:", err);

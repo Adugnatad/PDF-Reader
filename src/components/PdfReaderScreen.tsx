@@ -319,12 +319,12 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
   // Thumbnails Data Cache (data URLs)
   const [thumbnails, setThumbnails] = useState<Record<number, string>>({});
 
-  // Source for react-native-pdf (Web uses data URI, native devices can use local file URI or base64 data URI)
+  // Source for react-native-pdf (Web uses data URI, native devices stream directly from disk URI)
   const pdfSource = useMemo(() => {
-    if (!pdfBytes) return { uri: "" };
     if (Platform.OS !== "web" && nativePdfUri) {
       return { uri: nativePdfUri, cache: true };
     }
+    if (!pdfBytes || pdfBytes.byteLength === 0) return { uri: "" };
     const b64 = fastUint8ToBase64(pdfBytes);
     return { uri: `data:application/pdf;base64,${b64}`, cache: true };
   }, [pdfBytes, nativePdfUri]);
@@ -339,7 +339,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
   // Continuous page canvas refs
   const continuousCanvases = useRef<Map<number, any>>(new Map());
 
-  // 1. Fetch PDF Data from store with zero-delay cache utilization
+  // 1. Fetch PDF Data from store with zero-delay disk streaming
   useEffect(() => {
     let isCancelled = false;
     if (!pdfBytes && !nativePdfUri) {
@@ -351,7 +351,21 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
       try {
         let currentItem = initialCached;
         let currentBytes = pdfBytes;
-        let currentUri = nativePdfUri;
+        let currentUri: string | undefined = nativePdfUri;
+
+        // On native mobile: Stream directly from disk without reading into JS memory
+        if (Platform.OS !== "web") {
+          if (!currentUri) {
+            currentUri =
+              pdfStore.getNativeUri(activeId) ||
+              pdfStore.getNativeUri(docTitle);
+          }
+          if (currentUri) {
+            setNativePdfUri(currentUri);
+            setIsLoading(false);
+            return;
+          }
+        }
 
         if (!currentBytes || !currentItem) {
           const item = await pdfStore.getPdfData(activeId);
@@ -364,14 +378,21 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
         }
 
         if (Platform.OS !== "web") {
-          if (!currentUri && currentBytes) {
-            currentUri = await getPdfLocalUri(currentBytes, currentItem?.name || activeTitle);
-            if (isCancelled) return;
+          if (currentUri) {
+            setNativePdfUri(currentUri);
+            setIsLoading(false);
+            return;
           }
-          if (currentUri && currentUri !== nativePdfUri) {
+          if (!currentUri && currentBytes && currentBytes.byteLength > 0) {
+            currentUri = await getPdfLocalUri(
+              currentBytes,
+              currentItem?.name || activeTitle
+            );
+            if (isCancelled) return;
             setNativePdfUri(currentUri);
           }
           setIsLoading(false);
+          return;
         }
 
         // On Web, initialize pdfjsLib for search, reflow, and continuous view
