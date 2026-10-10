@@ -1,5 +1,5 @@
-import React, { createContext, useContext, useMemo, useState, useEffect } from 'react';
-import { View, StyleSheet, Platform, Dimensions, StatusBar, ViewStyle, StyleProp } from 'react-native';
+import React, { createContext, useContext, useMemo } from 'react';
+import { View, ViewProps, StyleSheet } from 'react-native';
 
 export interface EdgeInsets {
   top: number;
@@ -8,163 +8,113 @@ export interface EdgeInsets {
   left: number;
 }
 
-export interface SafeAreaViewProps {
-  children?: React.ReactNode;
-  style?: StyleProp<ViewStyle>;
-  edges?: readonly ('top' | 'right' | 'bottom' | 'left')[];
-  mode?: 'padding' | 'margin';
+export interface Metrics {
+  insets: EdgeInsets;
+  frame: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
 }
 
-const defaultInsets: EdgeInsets = {
+export const SafeAreaInsetsContext = createContext<EdgeInsets>({
   top: 0,
-  left: 0,
   right: 0,
   bottom: 0,
+  left: 0,
+});
+
+export const initialWindowMetrics: Metrics = {
+  frame: { x: 0, y: 0, width: 0, height: 0 },
+  insets: { top: 0, left: 0, right: 0, bottom: 0 },
 };
 
-const SafeAreaInsetsContext = createContext<EdgeInsets | null>(null);
-
-export const SafeAreaProvider: React.FC<{
+export function SafeAreaProvider({
+  children,
+  initialMetrics,
+  style,
+}: {
   children?: React.ReactNode;
-  initialMetrics?: any;
-  style?: StyleProp<ViewStyle>;
-}> = ({ children, style }) => {
-  const [insets, setInsets] = useState<EdgeInsets>(() => {
-    if (Platform.OS === 'android') {
-      const screen = Dimensions.get('screen');
-      const window = Dimensions.get('window');
-      const navBarDiff = Math.max(0, screen.height - window.height);
-      const statusBarHeight = StatusBar.currentHeight || 24;
-      return {
-        top: statusBarHeight,
-        left: 0,
-        right: 0,
-        bottom: navBarDiff > 0 ? navBarDiff : 48,
-      };
-    } else if (Platform.OS === 'ios') {
-      return {
-        top: 47,
-        left: 0,
-        right: 0,
-        bottom: 34,
-      };
+  initialMetrics?: Metrics | null;
+  style?: any;
+}) {
+  const insets: EdgeInsets = useMemo(() => {
+    if (initialMetrics?.insets) {
+      return initialMetrics.insets;
     }
-    return defaultInsets;
-  });
-
-  useEffect(() => {
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      // In web browser, measure CSS env(safe-area-inset-*)
-      const div = document.createElement('div');
-      div.style.position = 'fixed';
-      div.style.top = '0';
-      div.style.left = '0';
-      div.style.width = '0';
-      div.style.height = '0';
-      div.style.visibility = 'hidden';
-      div.style.paddingTop = 'env(safe-area-inset-top, 0px)';
-      div.style.paddingBottom = 'env(safe-area-inset-bottom, 0px)';
-      div.style.paddingLeft = 'env(safe-area-inset-left, 0px)';
-      div.style.paddingRight = 'env(safe-area-inset-right, 0px)';
-      document.body.appendChild(div);
-
-      const updateInsets = () => {
-        const computed = window.getComputedStyle(div);
-        const top = parseInt(computed.paddingTop || '0', 10) || 0;
-        const bottom = parseInt(computed.paddingBottom || '0', 10) || 0;
-        const left = parseInt(computed.paddingLeft || '0', 10) || 0;
-        const right = parseInt(computed.paddingRight || '0', 10) || 0;
-        setInsets({ top, bottom, left, right });
-      };
-
-      updateInsets();
-      window.addEventListener('resize', updateInsets);
-      return () => {
-        window.removeEventListener('resize', updateInsets);
-        div.remove();
-      };
-    }
-  }, []);
+    return {
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+    };
+  }, [initialMetrics]);
 
   return (
     <SafeAreaInsetsContext.Provider value={insets}>
       <View style={[styles.provider, style]}>{children}</View>
     </SafeAreaInsetsContext.Provider>
   );
-};
-
-export const SafeAreaConsumer = SafeAreaInsetsContext.Consumer;
+}
 
 export function useSafeAreaInsets(): EdgeInsets {
-  const insets = useContext(SafeAreaInsetsContext);
-  if (insets) {
-    return insets;
-  }
-  // Native fallback when provider not mounted
-  if (Platform.OS === 'android') {
-    const screen = Dimensions.get('screen');
-    const window = Dimensions.get('window');
-    const navBarDiff = Math.max(0, screen.height - window.height);
-    return {
-      top: StatusBar.currentHeight || 24,
-      left: 0,
-      right: 0,
-      bottom: navBarDiff > 0 ? navBarDiff : 48,
-    };
-  } else if (Platform.OS === 'ios') {
-    return {
-      top: 47,
-      left: 0,
-      right: 0,
-      bottom: 34,
-    };
-  }
-  return defaultInsets;
+  const context = useContext(SafeAreaInsetsContext);
+  return context || { top: 0, right: 0, bottom: 0, left: 0 };
 }
 
 export function useSafeAreaFrame() {
-  const window = Dimensions.get('window');
-  return {
-    x: 0,
-    y: 0,
-    width: window.width,
-    height: window.height,
-  };
+  const width = typeof window !== 'undefined' ? window.innerWidth : 390;
+  const height = typeof window !== 'undefined' ? window.innerHeight : 844;
+  return { x: 0, y: 0, width, height };
 }
 
-export const SafeAreaView = React.forwardRef<View, SafeAreaViewProps>(({
-  children,
-  style,
-  edges = ['top', 'bottom', 'left', 'right'],
-  mode = 'padding',
-  ...rest
-}, ref) => {
-  const insets = useSafeAreaInsets();
-  const flatStyle = StyleSheet.flatten(style) || {};
+export interface SafeAreaViewProps extends ViewProps {
+  edges?: readonly ('top' | 'right' | 'bottom' | 'left')[];
+  mode?: 'padding' | 'margin';
+}
 
-  const incTop = edges.includes('top');
-  const incBottom = edges.includes('bottom');
-  const incLeft = edges.includes('left');
-  const incRight = edges.includes('right');
+export const SafeAreaView = React.forwardRef<any, SafeAreaViewProps>(
+  (
+    {
+      children,
+      style,
+      edges = ['top', 'right', 'bottom', 'left'],
+      mode = 'padding',
+      ...props
+    },
+    ref
+  ) => {
+    const insets = useSafeAreaInsets();
+    const includeTop = edges.includes('top');
+    const includeBottom = edges.includes('bottom');
+    const includeLeft = edges.includes('left');
+    const includeRight = edges.includes('right');
 
-  const insetsStyle: ViewStyle = mode === 'margin' ? {
-    marginTop: (Number(flatStyle.marginTop ?? flatStyle.marginVertical ?? flatStyle.margin ?? 0)) + (incTop ? insets.top : 0),
-    marginBottom: (Number(flatStyle.marginBottom ?? flatStyle.marginVertical ?? flatStyle.margin ?? 0)) + (incBottom ? insets.bottom : 0),
-    marginLeft: (Number(flatStyle.marginLeft ?? flatStyle.marginHorizontal ?? flatStyle.margin ?? 0)) + (incLeft ? insets.left : 0),
-    marginRight: (Number(flatStyle.marginRight ?? flatStyle.marginHorizontal ?? flatStyle.margin ?? 0)) + (incRight ? insets.right : 0),
-  } : {
-    paddingTop: (Number(flatStyle.paddingTop ?? flatStyle.paddingVertical ?? flatStyle.padding ?? 0)) + (incTop ? insets.top : 0),
-    paddingBottom: (Number(flatStyle.paddingBottom ?? flatStyle.paddingVertical ?? flatStyle.padding ?? 0)) + (incBottom ? insets.bottom : 0),
-    paddingLeft: (Number(flatStyle.paddingLeft ?? flatStyle.paddingHorizontal ?? flatStyle.padding ?? 0)) + (incLeft ? insets.left : 0),
-    paddingRight: (Number(flatStyle.paddingRight ?? flatStyle.paddingHorizontal ?? flatStyle.padding ?? 0)) + (incRight ? insets.right : 0),
-  };
+    const edgeStyle =
+      mode === 'margin'
+        ? {
+            marginTop: includeTop ? insets.top : 0,
+            marginBottom: includeBottom ? insets.bottom : 0,
+            marginLeft: includeLeft ? insets.left : 0,
+            marginRight: includeRight ? insets.right : 0,
+          }
+        : {
+            paddingTop: includeTop ? insets.top : 0,
+            paddingBottom: includeBottom ? insets.bottom : 0,
+            paddingLeft: includeLeft ? insets.left : 0,
+            paddingRight: includeRight ? insets.right : 0,
+          };
 
-  return (
-    <View ref={ref} style={[style, insetsStyle]} {...rest}>
-      {children}
-    </View>
-  );
-});
+    return (
+      <View ref={ref} style={[styles.safeArea, edgeStyle, style]} {...props}>
+        {children}
+      </View>
+    );
+  }
+);
+
+SafeAreaView.displayName = 'SafeAreaView';
 
 const styles = StyleSheet.create({
   provider: {
@@ -172,13 +122,16 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
+  safeArea: {
+    flex: 1,
+  },
 });
 
 export default {
   SafeAreaProvider,
-  SafeAreaConsumer,
-  SafeAreaInsetsContext,
-  useSafeAreaInsets,
-  useSafeAreaFrame,
   SafeAreaView,
+  useSafeAreaInsets,
+  SafeAreaInsetsContext,
+  initialWindowMetrics,
+  useSafeAreaFrame,
 };

@@ -1,9 +1,13 @@
 import React from 'react';
 import { StyleSheet } from 'react-native';
 import { Slot } from 'expo-router';
+import * as SplashScreen from 'expo-splash-screen';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ToastProvider } from '../src/context/ToastContext';
 import { SafeAreaContainer } from '../src/components/SafeAreaContainer';
+
+// Keep the native splash screen visible until the initial files and library are loaded
+SplashScreen.preventAutoHideAsync().catch(() => {});
 
 function RootLayoutContent() {
   return (

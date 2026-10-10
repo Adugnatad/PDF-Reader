@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import * as SplashScreen from 'expo-splash-screen';
 import { FilesHomeScreen } from '../src/components/FilesHomeScreen';
 import { DocFile } from '../src/types';
 import { useToast } from '../src/context/ToastContext';
@@ -19,8 +20,9 @@ export default function IndexScreen() {
   const router = useRouter();
   const { showToast } = useToast();
   const [allFiles, setAllFiles] = useState<DocFile[]>(() => pdfStore.getUserFiles());
-  const [isSplashVisible, setIsSplashVisible] = useState(true);
-  const [splashStatus, setSplashStatus] = useState('Loading document library...');
+  // On native devices, expo-splash-screen handles the single native splash screen.
+  // On web, the in-app splash overlay provides the single initial launch screen.
+  const [isSplashVisible, setIsSplashVisible] = useState(Platform.OS === 'web');
   const fadeAnim = useRef(new Animated.Value(1)).current;
 
   // Keep allFiles in sync with store additions / scan discoveries
@@ -33,15 +35,14 @@ export default function IndexScreen() {
     return unsubscribe;
   }, []);
 
-  // Startup discovery and splash lifecycle
+  // Single unified splash lifecycle until files are listed on the homescreen
   useEffect(() => {
     let isMounted = true;
     const startTime = Date.now();
-    const MIN_SPLASH_MS = 750;
+    const MIN_SPLASH_MS = Platform.OS === 'web' ? 600 : 0;
 
     const startup = async () => {
       try {
-        setSplashStatus('Loading document library...');
         await pdfStore.waitForInit();
 
         let initialFiles = pdfStore.getUserFiles();
@@ -51,9 +52,8 @@ export default function IndexScreen() {
 
         // On native Android / iOS or if library is empty, run auto-discovery
         if (initialFiles.length === 0 || Platform.OS !== 'web') {
-          setSplashStatus('Scanning device for documents...');
           const timeoutPromise = new Promise<void>((resolve) =>
-            setTimeout(resolve, 4000)
+            setTimeout(resolve, 3000)
           );
 
           const scanTask = (async () => {
@@ -82,27 +82,31 @@ export default function IndexScreen() {
         initialFiles = pdfStore.getUserFiles();
         if (isMounted) {
           setAllFiles(initialFiles);
-          setSplashStatus('Listing documents...');
         }
       } catch (error) {
         console.warn('Startup discovery note:', error);
       } finally {
-        // Enforce minimum splash duration for polished native app launch feel
         const elapsed = Date.now() - startTime;
         const remaining = Math.max(0, MIN_SPLASH_MS - elapsed);
 
-        setTimeout(() => {
+        setTimeout(async () => {
           if (!isMounted) return;
-          // Fade out splash screen seamlessly into the homescreen
-          Animated.timing(fadeAnim, {
-            toValue: 0,
-            duration: 350,
-            useNativeDriver: Platform.OS !== 'web',
-          }).start(() => {
-            if (isMounted) {
-              setIsSplashVisible(false);
-            }
-          });
+
+          // Hide native splash screen on native devices - revealing files on homescreen
+          if (Platform.OS !== 'web') {
+            await SplashScreen.hideAsync().catch(() => {});
+          } else {
+            // Smoothly fade out the single web splash screen into the homescreen
+            Animated.timing(fadeAnim, {
+              toValue: 0,
+              duration: 300,
+              useNativeDriver: false,
+            }).start(() => {
+              if (isMounted) {
+                setIsSplashVisible(false);
+              }
+            });
+          }
         }, remaining);
       }
     };
@@ -138,14 +142,14 @@ export default function IndexScreen() {
         onShowToast={showToast}
       />
 
-      {/* Splash screen displayed until files are ready and listed */}
-      {isSplashVisible && (
+      {/* Single splash screen displayed on web until files are ready and listed */}
+      {Platform.OS === 'web' && isSplashVisible && (
         <Animated.View
           style={[
             styles.splashOverlay,
             { opacity: fadeAnim },
           ]}
-          pointerEvents={fadeAnim ? 'auto' : 'none'}
+          pointerEvents={isSplashVisible ? 'auto' : 'none'}
         >
           <View style={styles.splashContent}>
             {/* Brand Logo Box with soft glow */}
@@ -158,10 +162,10 @@ export default function IndexScreen() {
             <Text style={styles.splashTitle}>DocuFlow</Text>
             <Text style={styles.splashSubtitle}>PDF & Document Reader</Text>
 
-            {/* Loading Indicator & Status */}
+            {/* Clean Loading Indicator */}
             <View style={styles.loadingBox}>
               <ActivityIndicator size="small" color="#ff516a" />
-              <Text style={styles.splashStatusText}>{splashStatus}</Text>
+              <Text style={styles.splashStatusText}>Loading document library...</Text>
             </View>
           </View>
 
