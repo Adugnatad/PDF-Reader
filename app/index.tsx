@@ -1,12 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   Platform,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
-import { MaterialIcons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { FilesHomeScreen } from '../src/components/FilesHomeScreen';
 import { DocFile } from '../src/types';
@@ -18,55 +19,100 @@ export default function IndexScreen() {
   const router = useRouter();
   const { showToast } = useToast();
   const [allFiles, setAllFiles] = useState<DocFile[]>(() => pdfStore.getUserFiles());
+  const [isSplashVisible, setIsSplashVisible] = useState(true);
+  const [splashStatus, setSplashStatus] = useState('Loading document library...');
+  const fadeAnim = useRef(new Animated.Value(1)).current;
 
+  // Keep allFiles in sync with store additions / scan discoveries
   useEffect(() => {
     const unsubscribe = pdfStore.subscribe(() => {
-      setAllFiles(pdfStore.getUserFiles());
+      const files = pdfStore.getUserFiles();
+      setAllFiles(files);
     });
 
     return unsubscribe;
   }, []);
 
+  // Startup discovery and splash lifecycle
   useEffect(() => {
     let isMounted = true;
+    const startTime = Date.now();
+    const MIN_SPLASH_MS = 750;
 
-    const discoverFilesOnStartup = async () => {
+    const startup = async () => {
       try {
-        const timeoutPromise = new Promise<void>((resolve) =>
-          setTimeout(resolve, 8000)
-        );
+        setSplashStatus('Loading document library...');
+        await pdfStore.waitForInit();
 
-        const scanTask = (async () => {
-          const needsAndroidPermission =
-            Platform.OS === 'android' && Number(Platform.Version) >= 30;
-          let hasAccess = false;
+        let initialFiles = pdfStore.getUserFiles();
+        if (isMounted) {
+          setAllFiles(initialFiles);
+        }
 
-          if (needsAndroidPermission) {
-            try {
-              hasAccess = await hasAllFilesAccess();
-            } catch (error) {
-              console.warn('Could not check file access before discovery:', error);
+        // On native Android / iOS or if library is empty, run auto-discovery
+        if (initialFiles.length === 0 || Platform.OS !== 'web') {
+          setSplashStatus('Scanning device for documents...');
+          const timeoutPromise = new Promise<void>((resolve) =>
+            setTimeout(resolve, 4000)
+          );
+
+          const scanTask = (async () => {
+            const needsAndroidPermission =
+              Platform.OS === 'android' && Number(Platform.Version) >= 30;
+            let hasAccess = false;
+
+            if (needsAndroidPermission) {
+              try {
+                hasAccess = await hasAllFilesAccess();
+              } catch (error) {
+                console.warn('Could not check file access before discovery:', error);
+              }
             }
-          }
 
-          if (hasAccess) {
-            await pdfStore.scanDeviceOnceAfterPermission();
-          } else {
-            await pdfStore.scanDeviceAutomatically();
-          }
-        })();
+            if (hasAccess) {
+              await pdfStore.scanDeviceOnceAfterPermission();
+            } else {
+              await pdfStore.scanDeviceAutomatically();
+            }
+          })();
 
-        await Promise.race([scanTask, timeoutPromise]);
+          await Promise.race([scanTask, timeoutPromise]);
+        }
+
+        initialFiles = pdfStore.getUserFiles();
+        if (isMounted) {
+          setAllFiles(initialFiles);
+          setSplashStatus('Listing documents...');
+        }
       } catch (error) {
-        console.warn('Startup file discovery note:', error);
+        console.warn('Startup discovery note:', error);
+      } finally {
+        // Enforce minimum splash duration for polished native app launch feel
+        const elapsed = Date.now() - startTime;
+        const remaining = Math.max(0, MIN_SPLASH_MS - elapsed);
+
+        setTimeout(() => {
+          if (!isMounted) return;
+          // Fade out splash screen seamlessly into the homescreen
+          Animated.timing(fadeAnim, {
+            toValue: 0,
+            duration: 350,
+            useNativeDriver: Platform.OS !== 'web',
+          }).start(() => {
+            if (isMounted) {
+              setIsSplashVisible(false);
+            }
+          });
+        }, remaining);
       }
     };
 
-    void discoverFilesOnStartup();
+    void startup();
+
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [fadeAnim]);
 
   const handleOpenFile = (file: DocFile) => {
     pdfStore.recordFileOpened(file.id);
@@ -84,46 +130,150 @@ export default function IndexScreen() {
   };
 
   return (
-    <FilesHomeScreen
-      files={allFiles}
-      onOpenFile={handleOpenFile}
-      onShowToast={showToast}
-    />
+    <View style={styles.container}>
+      {/* Homescreen renders with listed files */}
+      <FilesHomeScreen
+        files={allFiles}
+        onOpenFile={handleOpenFile}
+        onShowToast={showToast}
+      />
+
+      {/* Splash screen displayed until files are ready and listed */}
+      {isSplashVisible && (
+        <Animated.View
+          style={[
+            styles.splashOverlay,
+            { opacity: fadeAnim },
+          ]}
+          pointerEvents={fadeAnim ? 'auto' : 'none'}
+        >
+          <View style={styles.splashContent}>
+            {/* Brand Logo Box with soft glow */}
+            <View style={styles.iconContainer}>
+              <View style={styles.iconBackdrop} />
+              <Ionicons name="document-text" size={42} color="#ff516a" />
+            </View>
+
+            {/* Typography */}
+            <Text style={styles.splashTitle}>DocuFlow</Text>
+            <Text style={styles.splashSubtitle}>PDF & Document Reader</Text>
+
+            {/* Loading Indicator & Status */}
+            <View style={styles.loadingBox}>
+              <ActivityIndicator size="small" color="#ff516a" />
+              <Text style={styles.splashStatusText}>{splashStatus}</Text>
+            </View>
+          </View>
+
+          {/* Footer branding */}
+          <View style={styles.splashFooter}>
+            <View style={styles.secureBadge}>
+              <Ionicons name="shield-checkmark" size={13} color="#7bd0ff" />
+              <Text style={styles.secureText}>Local Device Storage</Text>
+            </View>
+          </View>
+        </Animated.View>
+      )}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  splash: {
+  container: {
     flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
     backgroundColor: '#0b1326',
-    padding: 24,
+    width: '100%',
+    height: '100%',
   },
-  splashIcon: {
-    width: 68,
-    height: 68,
-    alignItems: 'center',
+  splashOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: '#0b1326',
+    zIndex: 9999,
     justifyContent: 'center',
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 81, 106, 0.15)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 81, 106, 0.3)',
+    alignItems: 'center',
+  },
+  splashContent: {
+    alignItems: 'center',
+    paddingHorizontal: 32,
+  },
+  iconContainer: {
+    width: 86,
+    height: 86,
+    borderRadius: 24,
+    backgroundColor: '#121d36',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 81, 106, 0.35)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#ff516a',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.35,
+    shadowRadius: 18,
+    elevation: 12,
+    position: 'relative',
+  },
+  iconBackdrop: {
+    position: 'absolute',
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(255, 81, 106, 0.12)',
   },
   splashTitle: {
-    marginTop: 18,
-    color: '#ffffff',
-    fontSize: 24,
+    marginTop: 22,
+    fontSize: 28,
     fontWeight: '800',
-    letterSpacing: -0.4,
+    color: '#ffffff',
+    letterSpacing: -0.6,
   },
-  splashMessage: {
-    marginTop: 8,
-    color: '#aab4c8',
+  splashSubtitle: {
+    marginTop: 6,
     fontSize: 14,
-    textAlign: 'center',
+    fontWeight: '500',
+    color: '#8e9ba0',
+    letterSpacing: 0.2,
   },
-  splashSpinner: {
-    marginTop: 28,
+  loadingBox: {
+    marginTop: 36,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: 'rgba(18, 29, 54, 0.75)',
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 30,
+    borderWidth: 1,
+    borderColor: 'rgba(45, 52, 73, 0.4)',
+  },
+  splashStatusText: {
+    fontSize: 13,
+    color: '#dae2fd',
+    fontWeight: '500',
+  },
+  splashFooter: {
+    position: 'absolute',
+    bottom: 36,
+    alignItems: 'center',
+  },
+  secureBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(123, 208, 255, 0.08)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(123, 208, 255, 0.2)',
+  },
+  secureText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#7bd0ff',
+    letterSpacing: 0.3,
   },
 });

@@ -73,9 +73,74 @@ class PdfStoreService {
     this.initPromise = this.initStore();
   }
 
+  public async waitForInit(): Promise<void> {
+    await this.initPromise;
+  }
+
   private async initStore() {
     await this.loadFromStorage();
+    if (this.userFiles.length === 0) {
+      this.seedDefaultFiles();
+    }
     this.resolveMissingPageCounts().catch(() => {});
+  }
+
+  private seedDefaultFiles() {
+    this.userFiles = [
+      {
+        id: 'sample-tax',
+        name: 'Q4_Tax_Filing_Signed.pdf',
+        type: 'pdf',
+        size: '1.2 MB',
+        modified: 'Today',
+        source: 'Local Storage',
+        status: 'Signed',
+        pageCount: 3,
+        folder: 'Documents',
+        favorite: true,
+        selected: false,
+      },
+      {
+        id: 'sample-contract',
+        name: 'Contract_Vendor_Agreement.pdf',
+        type: 'pdf',
+        size: '840 KB',
+        modified: 'Yesterday',
+        source: 'Local Storage',
+        status: 'Protected',
+        pageCount: 4,
+        folder: 'Documents',
+        favorite: false,
+        selected: false,
+      },
+      {
+        id: 'sample-audit',
+        name: 'Executive_Audit_Report_2026.pdf',
+        type: 'pdf',
+        size: '2.4 MB',
+        modified: 'Oct 8',
+        source: 'Device Storage',
+        status: 'Certified',
+        pageCount: 5,
+        folder: 'Downloads',
+        favorite: true,
+        selected: false,
+      },
+      {
+        id: 'sample-sheet',
+        name: 'Q3_Financial_Statements_Consolidated.xlsx',
+        type: 'xlsx',
+        size: '420 KB',
+        modified: 'Oct 6',
+        source: 'Local Storage',
+        status: 'Synced',
+        folder: 'Documents',
+        favorite: false,
+        selected: false,
+      },
+    ];
+    this.saveToStorage();
+    this.notify();
   }
 
   public subscribe(listener: () => void): () => void {
