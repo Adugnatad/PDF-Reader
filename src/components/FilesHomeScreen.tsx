@@ -171,10 +171,7 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
       const timeoutPromise = new Promise<void>((resolve) =>
         setTimeout(resolve, 10000),
       );
-      await Promise.race([
-        pdfStore.scanDeviceAutomatically(),
-        timeoutPromise,
-      ]);
+      await Promise.race([pdfStore.scanDeviceAutomatically(), timeoutPromise]);
 
       let currentFiles = pdfStore.getAllFiles();
 
@@ -333,10 +330,14 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
       >
         {/* Top Header */}
         <View style={styles.header}>
-          <View style={styles.titleRow}>
+          <View style={styles.titleColumn}>
             <View style={styles.titleGroup}>
               <View style={styles.appIconBadge}>
-                <MaterialIcons name="picture-as-pdf" size={22} color="#ff516a" />
+                <MaterialIcons
+                  name="picture-as-pdf"
+                  size={22}
+                  color="#ff516a"
+                />
               </View>
               <View>
                 <Text style={styles.headerTitle}>{getHeaderTitle()}</Text>
@@ -344,385 +345,403 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
               </View>
             </View>
 
-          {/* Header Quick Actions */}
-          <View style={styles.headerActions}>
-            <TouchableOpacity
-              style={styles.scanBtn}
-              onPress={handleScanDeviceStorage}
-              activeOpacity={0.75}
-              accessibilityLabel="Scan Device"
-            >
-              <Ionicons
-                name={isScanning ? "sync" : "scan-outline"}
-                size={16}
-                color="#7bd0ff"
-              />
-              <Text style={styles.scanBtnText}>
-                {isScanning ? "Scanning..." : "Scan Device"}
-              </Text>
-            </TouchableOpacity>
+            {/* Header Quick Actions */}
+            <View style={styles.headerActions}>
+              <TouchableOpacity
+                style={styles.scanBtn}
+                onPress={handleScanDeviceStorage}
+                activeOpacity={0.75}
+                accessibilityLabel="Scan Device"
+              >
+                <Ionicons
+                  name={isScanning ? "sync" : "scan-outline"}
+                  size={16}
+                  color="#7bd0ff"
+                />
+                <Text style={styles.scanBtnText}>
+                  {isScanning ? "Scanning..." : "Scan Device"}
+                </Text>
+              </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.openDeviceBtn}
-              onPress={handleOpenDeviceFile}
-              activeOpacity={0.75}
-              accessibilityLabel="Open PDF File"
-            >
-              <Ionicons name="folder-open-outline" size={16} color="#0d0096" />
-              <Text style={styles.openDeviceBtnText}>Open File</Text>
-            </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.openDeviceBtn}
+                onPress={handleOpenDeviceFile}
+                activeOpacity={0.75}
+                accessibilityLabel="Open PDF File"
+              >
+                <Ionicons
+                  name="folder-open-outline"
+                  size={16}
+                  color="#0d0096"
+                />
+                <Text style={styles.openDeviceBtnText}>Open File</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* Search Bar */}
+          <View style={styles.searchBar}>
+            <Ionicons
+              name="search"
+              size={18}
+              color="#908fa0"
+              style={styles.searchIcon}
+            />
+            <TextInput
+              placeholder="Search PDF documents..."
+              placeholderTextColor="#908fa0"
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              style={styles.searchInput}
+            />
+            {searchQuery ? (
+              <TouchableOpacity
+                onPress={() => setSearchQuery("")}
+                style={styles.clearSearchBtn}
+              >
+                <Ionicons name="close" size={18} color="#908fa0" />
+              </TouchableOpacity>
+            ) : null}
           </View>
         </View>
 
-        {/* Search Bar */}
-        <View style={styles.searchBar}>
-          <Ionicons
-            name="search"
-            size={18}
-            color="#908fa0"
-            style={styles.searchIcon}
-          />
-          <TextInput
-            placeholder="Search PDF documents..."
-            placeholderTextColor="#908fa0"
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            style={styles.searchInput}
-          />
-          {searchQuery ? (
-            <TouchableOpacity
-              onPress={() => setSearchQuery("")}
-              style={styles.clearSearchBtn}
-            >
-              <Ionicons name="close" size={18} color="#908fa0" />
-            </TouchableOpacity>
-          ) : null}
-        </View>
-      </View>
+        {/* Main Files List Content */}
+        <View style={styles.mainContent}>
+          {/* Controls Bar */}
+          <View style={styles.controlsBar}>
+            <View style={styles.fileCountGroup}>
+              <Text style={styles.sectionHeading}>All PDFs</Text>
+              <Text style={styles.fileCountBadge}>
+                ({filteredFiles.length})
+              </Text>
+            </View>
 
-      {/* Main Files List Content */}
-      <View style={styles.mainContent}>
-        {/* Controls Bar */}
-        <View style={styles.controlsBar}>
-          <View style={styles.fileCountGroup}>
-            <Text style={styles.sectionHeading}>All PDFs</Text>
-            <Text style={styles.fileCountBadge}>({filteredFiles.length})</Text>
+            {/* Sort Button & Dropdown */}
+            <View style={styles.sortContainer}>
+              <TouchableOpacity
+                onPress={() => setShowSortMenu(!showSortMenu)}
+                style={styles.sortButton}
+                activeOpacity={0.7}
+              >
+                <Ionicons
+                  name="swap-vertical-outline"
+                  size={15}
+                  color="#c7c4d7"
+                />
+                <Text style={styles.sortButtonText}>
+                  {sortBy === "date"
+                    ? "Date Modified"
+                    : sortBy === "name"
+                      ? "Name (A-Z)"
+                      : sortBy === "size"
+                        ? "File Size"
+                        : "Page Count"}
+                </Text>
+              </TouchableOpacity>
+
+              {showSortMenu && (
+                <View style={styles.sortDropdown}>
+                  <TouchableOpacity
+                    onPress={() => {
+                      setSortBy("date");
+                      setSortAsc(!sortAsc);
+                      setShowSortMenu(false);
+                      onShowToast("Sorted by Date Modified");
+                    }}
+                    style={styles.sortItem}
+                  >
+                    <Text style={styles.sortItemText}>Date Modified</Text>
+                    {sortBy === "date" && (
+                      <Ionicons
+                        name={sortAsc ? "chevron-up" : "chevron-down"}
+                        size={14}
+                        color="#7bd0ff"
+                      />
+                    )}
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    onPress={() => {
+                      setSortBy("name");
+                      setSortAsc(!sortAsc);
+                      setShowSortMenu(false);
+                      onShowToast("Sorted by Name");
+                    }}
+                    style={styles.sortItem}
+                  >
+                    <Text style={styles.sortItemText}>Name (A-Z)</Text>
+                    {sortBy === "name" && (
+                      <Ionicons
+                        name={sortAsc ? "chevron-up" : "chevron-down"}
+                        size={14}
+                        color="#7bd0ff"
+                      />
+                    )}
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    onPress={() => {
+                      setSortBy("size");
+                      setSortAsc(!sortAsc);
+                      setShowSortMenu(false);
+                      onShowToast("Sorted by File Size");
+                    }}
+                    style={styles.sortItem}
+                  >
+                    <Text style={styles.sortItemText}>File Size</Text>
+                    {sortBy === "size" && (
+                      <Ionicons
+                        name={sortAsc ? "chevron-up" : "chevron-down"}
+                        size={14}
+                        color="#7bd0ff"
+                      />
+                    )}
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    onPress={() => {
+                      setSortBy("pages");
+                      setSortAsc(!sortAsc);
+                      setShowSortMenu(false);
+                      onShowToast("Sorted by Page Count");
+                    }}
+                    style={styles.sortItem}
+                  >
+                    <Text style={styles.sortItemText}>Page Count</Text>
+                    {sortBy === "pages" && (
+                      <Ionicons
+                        name={sortAsc ? "chevron-up" : "chevron-down"}
+                        size={14}
+                        color="#7bd0ff"
+                      />
+                    )}
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
           </View>
 
-          {/* Sort Button & Dropdown */}
-          <View style={styles.sortContainer}>
-            <TouchableOpacity
-              onPress={() => setShowSortMenu(!showSortMenu)}
-              style={styles.sortButton}
-              activeOpacity={0.7}
-            >
-              <Ionicons
-                name="swap-vertical-outline"
-                size={15}
-                color="#c7c4d7"
-              />
-              <Text style={styles.sortButtonText}>
-                {sortBy === "date"
-                  ? "Date Modified"
-                  : sortBy === "name"
-                    ? "Name (A-Z)"
-                    : sortBy === "size"
-                      ? "File Size"
-                      : "Page Count"}
-              </Text>
-            </TouchableOpacity>
-
-            {showSortMenu && (
-              <View style={styles.sortDropdown}>
-                <TouchableOpacity
-                  onPress={() => {
-                    setSortBy("date");
-                    setSortAsc(!sortAsc);
-                    setShowSortMenu(false);
-                    onShowToast("Sorted by Date Modified");
-                  }}
-                  style={styles.sortItem}
+          {/* PDF Documents List */}
+          <View style={styles.filesList}>
+            {filteredFiles.length === 0 ? (
+              <View style={styles.emptyContainer}>
+                <View
+                  style={[
+                    styles.emptyIconCircle,
+                    activeBottomTab === "favorite" && {
+                      backgroundColor: "rgba(245, 158, 11, 0.15)",
+                      borderColor: "rgba(245, 158, 11, 0.3)",
+                    },
+                  ]}
                 >
-                  <Text style={styles.sortItemText}>Date Modified</Text>
-                  {sortBy === "date" && (
+                  <Ionicons
+                    name={
+                      activeBottomTab === "favorite"
+                        ? "star-outline"
+                        : activeBottomTab === "recent"
+                          ? "time-outline"
+                          : "document-text-outline"
+                    }
+                    size={42}
+                    color={
+                      activeBottomTab === "favorite" ? "#f59e0b" : "#7bd0ff"
+                    }
+                  />
+                </View>
+                <Text style={styles.emptyTitle}>
+                  {searchQuery
+                    ? "No matching documents"
+                    : activeBottomTab === "favorite"
+                      ? "No favorite documents"
+                      : activeBottomTab === "recent"
+                        ? "No recent documents"
+                        : "No PDF documents"}
+                </Text>
+                <Text style={styles.emptySubtitle}>
+                  {searchQuery
+                    ? `No documents matching "${searchQuery}"`
+                    : activeBottomTab === "favorite"
+                      ? "Tap the star icon on any PDF document card to add it to your favorites."
+                      : activeBottomTab === "recent"
+                        ? "Documents you open will appear here for fast access."
+                        : "Open any PDF from your device storage to read with smooth full-screen view, zoom, and annotations."}
+                </Text>
+                {searchQuery ? (
+                  <TouchableOpacity
+                    onPress={() => setSearchQuery("")}
+                    style={styles.emptyActionBtn}
+                  >
+                    <Text style={styles.emptyActionBtnText}>Clear Search</Text>
+                  </TouchableOpacity>
+                ) : activeBottomTab !== "document" ? (
+                  <TouchableOpacity
+                    onPress={() => setActiveBottomTab("document")}
+                    style={styles.emptyActionPrimaryBtn}
+                    activeOpacity={0.8}
+                  >
                     <Ionicons
-                      name={sortAsc ? "chevron-up" : "chevron-down"}
-                      size={14}
-                      color="#7bd0ff"
+                      name="document-text-outline"
+                      size={17}
+                      color="#0d0096"
                     />
-                  )}
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  onPress={() => {
-                    setSortBy("name");
-                    setSortAsc(!sortAsc);
-                    setShowSortMenu(false);
-                    onShowToast("Sorted by Name");
-                  }}
-                  style={styles.sortItem}
-                >
-                  <Text style={styles.sortItemText}>Name (A-Z)</Text>
-                  {sortBy === "name" && (
+                    <Text style={styles.emptyActionPrimaryBtnText}>
+                      Browse Documents
+                    </Text>
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity
+                    onPress={handleOpenDeviceFile}
+                    style={styles.emptyActionPrimaryBtn}
+                    activeOpacity={0.8}
+                  >
                     <Ionicons
-                      name={sortAsc ? "chevron-up" : "chevron-down"}
-                      size={14}
-                      color="#7bd0ff"
+                      name="folder-open-outline"
+                      size={17}
+                      color="#0d0096"
                     />
-                  )}
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  onPress={() => {
-                    setSortBy("size");
-                    setSortAsc(!sortAsc);
-                    setShowSortMenu(false);
-                    onShowToast("Sorted by File Size");
-                  }}
-                  style={styles.sortItem}
-                >
-                  <Text style={styles.sortItemText}>File Size</Text>
-                  {sortBy === "size" && (
-                    <Ionicons
-                      name={sortAsc ? "chevron-up" : "chevron-down"}
-                      size={14}
-                      color="#7bd0ff"
-                    />
-                  )}
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  onPress={() => {
-                    setSortBy("pages");
-                    setSortAsc(!sortAsc);
-                    setShowSortMenu(false);
-                    onShowToast("Sorted by Page Count");
-                  }}
-                  style={styles.sortItem}
-                >
-                  <Text style={styles.sortItemText}>Page Count</Text>
-                  {sortBy === "pages" && (
-                    <Ionicons
-                      name={sortAsc ? "chevron-up" : "chevron-down"}
-                      size={14}
-                      color="#7bd0ff"
-                    />
-                  )}
-                </TouchableOpacity>
+                    <Text style={styles.emptyActionPrimaryBtnText}>
+                      Open PDF from Device
+                    </Text>
+                  </TouchableOpacity>
+                )}
               </View>
+            ) : (
+              filteredFiles.map((file) => {
+                const displayName = isUuidOrHash(file.name)
+                  ? resolvePdfDisplayName(
+                      file.name,
+                      pdfStore.getNativeUri(file.id),
+                      undefined,
+                    ).name
+                  : file.name;
+
+                return (
+                  <TouchableOpacity
+                    key={file.id}
+                    onPress={() => handleCardPress(file, displayName)}
+                    onPressIn={() => pdfStore.prewarmPdf(file.id)}
+                    style={styles.fileCard}
+                    activeOpacity={0.7}
+                  >
+                    {/* Real PDF Document Page Preview */}
+                    <PdfThumbnailPreview
+                      fileId={file.id}
+                      fileName={displayName}
+                    />
+
+                    {/* Document Information */}
+                    <View style={styles.fileDetails}>
+                      <Text style={styles.fileName} numberOfLines={1}>
+                        {displayName}
+                      </Text>
+                      <View style={styles.metaRow}>
+                        <Text style={styles.metaText}>
+                          {file.pageCount === 1
+                            ? "1 page"
+                            : `${file.pageCount || 1} pages`}
+                        </Text>
+                        <Text style={styles.metaDot}>•</Text>
+                        <Text style={styles.metaText}>{file.size}</Text>
+                        <Text style={styles.metaDot}>•</Text>
+                        <Text style={styles.metaText}>{file.modified}</Text>
+                      </View>
+                    </View>
+
+                    {/* Star / Favorite Button */}
+                    <TouchableOpacity
+                      onPress={(e) => handleToggleFavorite(file.id, e)}
+                      style={styles.starBtn}
+                      accessibilityLabel="Toggle Favorite"
+                    >
+                      <Ionicons
+                        name={file.favorite ? "star" : "star-outline"}
+                        size={18}
+                        color={file.favorite ? "#f59e0b" : "#64748b"}
+                      />
+                    </TouchableOpacity>
+
+                    {/* Rename File Button */}
+                    <TouchableOpacity
+                      onPress={(e) =>
+                        handleStartRename(file.id, displayName, e)
+                      }
+                      style={styles.renameBtn}
+                      accessibilityLabel="Rename Document"
+                    >
+                      <MaterialIcons name="edit" size={17} color="#64748b" />
+                    </TouchableOpacity>
+
+                    {/* Remove / Delete File Button */}
+                    <TouchableOpacity
+                      onPress={(e) => handleDeleteFile(file.id, file.name, e)}
+                      style={styles.deleteFileBtn}
+                      accessibilityLabel="Remove File"
+                    >
+                      <Ionicons
+                        name="trash-outline"
+                        size={16}
+                        color="#64748b"
+                      />
+                    </TouchableOpacity>
+
+                    {/* Chevron Right */}
+                    <Ionicons
+                      name="chevron-forward"
+                      size={18}
+                      color="#908fa0"
+                    />
+                  </TouchableOpacity>
+                );
+              })
             )}
           </View>
         </View>
 
-        {/* PDF Documents List */}
-        <View style={styles.filesList}>
-          {filteredFiles.length === 0 ? (
-            <View style={styles.emptyContainer}>
-              <View
-                style={[
-                  styles.emptyIconCircle,
-                  activeBottomTab === "favorite" && {
-                    backgroundColor: "rgba(245, 158, 11, 0.15)",
-                    borderColor: "rgba(245, 158, 11, 0.3)",
-                  },
-                ]}
-              >
-                <Ionicons
-                  name={
-                    activeBottomTab === "favorite"
-                      ? "star-outline"
-                      : activeBottomTab === "recent"
-                      ? "time-outline"
-                      : "document-text-outline"
-                  }
-                  size={42}
-                  color={activeBottomTab === "favorite" ? "#f59e0b" : "#7bd0ff"}
-                />
+        {/* Rename Document Modal */}
+        <Modal
+          visible={renameModalVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setRenameModalVisible(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.renameCard}>
+              <View style={styles.renameHeader}>
+                <MaterialIcons name="edit-note" size={24} color="#7bd0ff" />
+                <Text style={styles.renameTitle}>Rename Document</Text>
               </View>
-              <Text style={styles.emptyTitle}>
-                {searchQuery
-                  ? "No matching documents"
-                  : activeBottomTab === "favorite"
-                  ? "No favorite documents"
-                  : activeBottomTab === "recent"
-                  ? "No recent documents"
-                  : "No PDF documents"}
+              <Text style={styles.renameSubtitle}>
+                Enter a new file title for this document.
               </Text>
-              <Text style={styles.emptySubtitle}>
-                {searchQuery
-                  ? `No documents matching "${searchQuery}"`
-                  : activeBottomTab === "favorite"
-                  ? "Tap the star icon on any PDF document card to add it to your favorites."
-                  : activeBottomTab === "recent"
-                  ? "Documents you open will appear here for fast access."
-                  : "Open any PDF from your device storage to read with smooth full-screen view, zoom, and annotations."}
-              </Text>
-              {searchQuery ? (
+              <TextInput
+                value={editingFileName}
+                onChangeText={setEditingFileName}
+                placeholder="Document Title"
+                placeholderTextColor="#64748b"
+                style={styles.renameInput}
+                autoFocus
+                selectTextOnFocus
+                onSubmitEditing={handleConfirmRename}
+              />
+              <View style={styles.renameActions}>
                 <TouchableOpacity
-                  onPress={() => setSearchQuery("")}
-                  style={styles.emptyActionBtn}
-                >
-                  <Text style={styles.emptyActionBtnText}>Clear Search</Text>
-                </TouchableOpacity>
-              ) : activeBottomTab !== "document" ? (
-                <TouchableOpacity
-                  onPress={() => setActiveBottomTab("document")}
-                  style={styles.emptyActionPrimaryBtn}
-                  activeOpacity={0.8}
-                >
-                  <Ionicons
-                    name="document-text-outline"
-                    size={17}
-                    color="#0d0096"
-                  />
-                  <Text style={styles.emptyActionPrimaryBtnText}>
-                    Browse Documents
-                  </Text>
-                </TouchableOpacity>
-              ) : (
-                <TouchableOpacity
-                  onPress={handleOpenDeviceFile}
-                  style={styles.emptyActionPrimaryBtn}
-                  activeOpacity={0.8}
-                >
-                  <Ionicons
-                    name="folder-open-outline"
-                    size={17}
-                    color="#0d0096"
-                  />
-                  <Text style={styles.emptyActionPrimaryBtnText}>
-                    Open PDF from Device
-                  </Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          ) : (
-            filteredFiles.map((file) => {
-              const displayName = isUuidOrHash(file.name)
-                ? resolvePdfDisplayName(
-                    file.name,
-                    pdfStore.getNativeUri(file.id),
-                    undefined,
-                  ).name
-                : file.name;
-
-              return (
-                <TouchableOpacity
-                  key={file.id}
-                  onPress={() => handleCardPress(file, displayName)}
-                  onPressIn={() => pdfStore.prewarmPdf(file.id)}
-                  style={styles.fileCard}
+                  onPress={() => setRenameModalVisible(false)}
+                  style={styles.renameCancelBtn}
                   activeOpacity={0.7}
                 >
-                  {/* Real PDF Document Page Preview */}
-                  <PdfThumbnailPreview
-                    fileId={file.id}
-                    fileName={displayName}
-                  />
-
-                  {/* Document Information */}
-                  <View style={styles.fileDetails}>
-                    <Text style={styles.fileName} numberOfLines={1}>
-                      {displayName}
-                    </Text>
-                    <View style={styles.metaRow}>
-                      <Text style={styles.metaText}>
-                        {file.pageCount === 1
-                          ? "1 page"
-                          : `${file.pageCount || 1} pages`}
-                      </Text>
-                      <Text style={styles.metaDot}>•</Text>
-                      <Text style={styles.metaText}>{file.size}</Text>
-                      <Text style={styles.metaDot}>•</Text>
-                      <Text style={styles.metaText}>{file.modified}</Text>
-                    </View>
-                  </View>
-
-                  {/* Star / Favorite Button */}
-                  <TouchableOpacity
-                    onPress={(e) => handleToggleFavorite(file.id, e)}
-                    style={styles.starBtn}
-                    accessibilityLabel="Toggle Favorite"
-                  >
-                    <Ionicons
-                      name={file.favorite ? "star" : "star-outline"}
-                      size={18}
-                      color={file.favorite ? "#f59e0b" : "#64748b"}
-                    />
-                  </TouchableOpacity>
-
-                  {/* Rename File Button */}
-                  <TouchableOpacity
-                    onPress={(e) => handleStartRename(file.id, displayName, e)}
-                    style={styles.renameBtn}
-                    accessibilityLabel="Rename Document"
-                  >
-                    <MaterialIcons name="edit" size={17} color="#64748b" />
-                  </TouchableOpacity>
-
-                  {/* Remove / Delete File Button */}
-                  <TouchableOpacity
-                    onPress={(e) => handleDeleteFile(file.id, file.name, e)}
-                    style={styles.deleteFileBtn}
-                    accessibilityLabel="Remove File"
-                  >
-                    <Ionicons name="trash-outline" size={16} color="#64748b" />
-                  </TouchableOpacity>
-
-                  {/* Chevron Right */}
-                  <Ionicons name="chevron-forward" size={18} color="#908fa0" />
+                  <Text style={styles.renameCancelText}>Cancel</Text>
                 </TouchableOpacity>
-              );
-            })
-          )}
-        </View>
-      </View>
-
-      {/* Rename Document Modal */}
-      <Modal
-        visible={renameModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setRenameModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.renameCard}>
-            <View style={styles.renameHeader}>
-              <MaterialIcons name="edit-note" size={24} color="#7bd0ff" />
-              <Text style={styles.renameTitle}>Rename Document</Text>
-            </View>
-            <Text style={styles.renameSubtitle}>
-              Enter a new file title for this document.
-            </Text>
-            <TextInput
-              value={editingFileName}
-              onChangeText={setEditingFileName}
-              placeholder="Document Title"
-              placeholderTextColor="#64748b"
-              style={styles.renameInput}
-              autoFocus
-              selectTextOnFocus
-              onSubmitEditing={handleConfirmRename}
-            />
-            <View style={styles.renameActions}>
-              <TouchableOpacity
-                onPress={() => setRenameModalVisible(false)}
-                style={styles.renameCancelBtn}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.renameCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={handleConfirmRename}
-                style={styles.renameSaveBtn}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.renameSaveText}>Save</Text>
-              </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={handleConfirmRename}
+                  style={styles.renameSaveBtn}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.renameSaveText}>Save</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
-        </View>
-      </Modal>
+        </Modal>
       </ScrollView>
 
       {/* Bottom Navigation Tab Bar (Document, Recent, Favorite) */}
@@ -857,9 +876,8 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "rgba(45, 52, 73, 0.4)",
   },
-  titleRow: {
+  titleColumn: {
     marginBottom: 12,
-    flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     flexWrap: "wrap",
@@ -868,6 +886,8 @@ const styles = StyleSheet.create({
   titleGroup: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "flex-start",
+    width: "100%",
     gap: 10,
   },
   appIconBadge: {
@@ -894,6 +914,8 @@ const styles = StyleSheet.create({
   headerActions: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "flex-end",
+    width: "100%",
     gap: 8,
   },
   scanBtn: {
