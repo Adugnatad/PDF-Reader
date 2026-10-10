@@ -1,13 +1,14 @@
 import React from 'react';
-import { View, StyleSheet } from 'react-native';
+import { StyleSheet } from 'react-native';
 import { Slot } from 'expo-router';
 import { ToastProvider } from '../src/context/ToastContext';
+import { SafeAreaContainer } from '../src/components/SafeAreaContainer';
 
 function RootLayoutContent() {
   return (
-    <View style={styles.root}>
+    <SafeAreaContainer backgroundColor="#0b1326" style={styles.root}>
       <Slot />
-    </View>
+    </SafeAreaContainer>
   );
 }
 
