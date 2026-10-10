@@ -825,7 +825,7 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: "rgba(255, 255, 255, 0.08)",
     paddingVertical: 8,
-    paddingBottom: Platform.OS === "ios" ? 22 : 8,
+    paddingBottom: 8,
     elevation: 10,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: -2 },

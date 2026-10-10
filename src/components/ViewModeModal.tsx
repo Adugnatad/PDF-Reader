@@ -393,7 +393,7 @@ const styles = StyleSheet.create({
     zIndex: 9999,
     justifyContent: 'flex-end',
     alignItems: 'center',
-    paddingBottom: Platform.OS === 'web' ? 16 : 0,
+    paddingBottom: Platform.OS === 'web' ? 16 : (Platform.OS === 'android' ? 52 : 28),
     paddingHorizontal: 12,
   },
   backdropTouch: {

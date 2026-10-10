@@ -1,6 +1,7 @@
 import React from 'react';
 import { StyleSheet } from 'react-native';
 import { Slot } from 'expo-router';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ToastProvider } from '../src/context/ToastContext';
 import { SafeAreaContainer } from '../src/components/SafeAreaContainer';
 
@@ -14,9 +15,11 @@ function RootLayoutContent() {
 
 export default function RootLayout() {
   return (
-    <ToastProvider>
-      <RootLayoutContent />
-    </ToastProvider>
+    <SafeAreaProvider>
+      <ToastProvider>
+        <RootLayoutContent />
+      </ToastProvider>
+    </SafeAreaProvider>
   );
 }
 
