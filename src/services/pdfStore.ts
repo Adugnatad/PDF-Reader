@@ -47,6 +47,17 @@ function cloneBufferSafe(data: Uint8Array | ArrayBuffer): Uint8Array {
   return copy;
 }
 
+function parseFileSizeToBytes(sizeStr?: string): number {
+  if (!sizeStr) return 0;
+  const lower = sizeStr.toLowerCase().trim();
+  const num = parseFloat(lower);
+  if (isNaN(num)) return 0;
+  if (lower.includes('gb')) return num * 1024 * 1024 * 1024;
+  if (lower.includes('mb')) return num * 1024 * 1024;
+  if (lower.includes('kb')) return num * 1024;
+  return num;
+}
+
 class PdfStoreService {
   private pdfCache: Map<string, StoredPdf> = new Map();
   private userFiles: DocFile[] = [];
@@ -668,13 +679,15 @@ class PdfStoreService {
    * Automatically resolves and updates actual page counts for all files in the background.
    */
   public async resolveMissingPageCounts(): Promise<void> {
-    const uncounted = this.userFiles.filter((f) => !f.pageCount).slice(0, 5);
+    const uncounted = this.userFiles
+      .filter((f) => !f.pageCount && (!f.size || parseFileSizeToBytes(f.size) <= 20 * 1024 * 1024))
+      .slice(0, 5);
     for (const f of uncounted) {
       const uri = this.nativeUriMap.get(f.id) || this.nativeUriMap.get(f.name);
       if (uri) {
         try {
           const bytes = await readNativePdfBytes(uri);
-          if (bytes) {
+          if (bytes && bytes.byteLength > 0) {
             const info = await extractPdfInfoFromBytesAsync(bytes);
             if (info.pageCount && info.pageCount > 0 && info.pageCount !== f.pageCount) {
               this.updatePageCount(f.id, info.pageCount);

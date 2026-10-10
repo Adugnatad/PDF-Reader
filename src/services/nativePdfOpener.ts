@@ -14,9 +14,16 @@ export async function getPdfLocalUri(pdfBytes: Uint8Array | ArrayBuffer, fileNam
   return URL.createObjectURL(blob);
 }
 
-export async function openInNativeSystemViewer(pdfBytes: Uint8Array | ArrayBuffer, fileName: string): Promise<boolean> {
+export async function openInNativeSystemViewer(
+  pdfBytesOrUri: Uint8Array | ArrayBuffer | string,
+  fileName: string
+): Promise<boolean> {
   if (typeof window !== 'undefined') {
-    const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
+    if (typeof pdfBytesOrUri === 'string') {
+      window.open(pdfBytesOrUri, '_blank');
+      return true;
+    }
+    const blob = new Blob([pdfBytesOrUri as any], { type: 'application/pdf' });
     const url = URL.createObjectURL(blob);
     window.open(url, '_blank');
     return true;

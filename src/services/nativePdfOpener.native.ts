@@ -64,11 +64,29 @@ export async function getPdfLocalUri(pdfBytes: Uint8Array | ArrayBuffer, fileNam
 /**
  * Directly opens the PDF in the native mobile device's system PDF viewer
  * (Apple QuickLook on iOS, Google Drive / System PDF Viewer on Android)
- * with zero text extraction and zero wait!
+ * with zero text extraction and zero wait! Accepts either in-memory bytes or direct disk file URI.
  */
-export async function openInNativeSystemViewer(pdfBytes: Uint8Array | ArrayBuffer, fileName: string): Promise<boolean> {
+export async function openInNativeSystemViewer(
+  pdfBytesOrUri: Uint8Array | ArrayBuffer | string,
+  fileName: string
+): Promise<boolean> {
   try {
-    const fileUri = await getPdfLocalUri(pdfBytes, fileName);
+    let fileUri: string;
+    if (typeof pdfBytesOrUri === 'string') {
+      fileUri = pdfBytesOrUri;
+    } else {
+      if (pdfBytesOrUri.byteLength === 0) {
+        const cached = getCachedLocalUri(fileName);
+        if (cached) {
+          fileUri = cached;
+        } else {
+          return false;
+        }
+      } else {
+        fileUri = await getPdfLocalUri(pdfBytesOrUri, fileName);
+      }
+    }
+
     const available = await Sharing.isAvailableAsync();
     if (available) {
       await Sharing.shareAsync(fileUri, {

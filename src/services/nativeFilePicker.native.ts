@@ -169,7 +169,7 @@ async function scanSafDirectory(
   }
 }
 
-export const MAX_SAFE_BUFFER_BYTES = 25 * 1024 * 1024; // 25 MB safety limit
+export const MAX_SAFE_BUFFER_BYTES = 20 * 1024 * 1024; // 20 MB safety limit
 
 /**
  * Reads binary ArrayBuffer from a native device file URI or absolute path.
@@ -180,30 +180,29 @@ export async function readNativePdfBytes(
 ): Promise<ArrayBuffer | null> {
   const cleanPath = fileUriOrPath.replace("file://", "");
 
-  // 1. Check file size first: Never load large files (> 25MB) into JS Base64 memory
+  // 1. Strictly determine file size first: Never load large or unknown files into JS Base64 memory
+  let fileSize = 0;
   try {
-    let fileSize = 0;
+    const stat = await ReactNativeBlobUtil.fs.stat(cleanPath);
+    fileSize =
+      typeof stat.size === "string" ? parseInt(stat.size, 10) : stat.size || 0;
+  } catch {
     try {
-      const stat = await ReactNativeBlobUtil.fs.stat(cleanPath);
-      fileSize =
-        typeof stat.size === "string" ? parseInt(stat.size, 10) : stat.size || 0;
-    } catch {
-      try {
-        const info = await FileSystem.getInfoAsync(fileUriOrPath);
-        fileSize = (info as any).size || 0;
-      } catch {}
-    }
+      const info = await FileSystem.getInfoAsync(fileUriOrPath);
+      fileSize = (info as any).size || 0;
+    } catch {}
+  }
 
-    if (fileSize > MAX_SAFE_BUFFER_BYTES) {
-      console.warn(
-        `[Memory Guard] Skipping in-memory Base64 read of large file (${(
-          fileSize /
-          (1024 * 1024)
-        ).toFixed(1)} MB). Native streaming from disk is used.`
-      );
-      return null;
-    }
-  } catch {}
+  // If file size exceeds safe limit (> 20MB) or couldn't be verified, DO NOT read into JS memory!
+  if (fileSize > MAX_SAFE_BUFFER_BYTES) {
+    console.warn(
+      `[Memory Guard] Skipping in-memory Base64 read of large file (${(
+        fileSize /
+        (1024 * 1024)
+      ).toFixed(1)} MB). Native streaming from disk is used.`
+    );
+    return null;
+  }
 
   // 2. Try fetch first (streams directly into native binary ArrayBuffer without huge Java Base64 string)
   try {
@@ -218,27 +217,32 @@ export async function readNativePdfBytes(
     }
   } catch {}
 
-  // 3. For small files only (<= 25MB), fallback to ReactNativeBlobUtil
-  try {
-    const exists = await ReactNativeBlobUtil.fs.exists(cleanPath);
-    if (exists) {
-      const base64 = await ReactNativeBlobUtil.fs.readFile(cleanPath, "base64");
-      if (base64) {
-        return base64ToArrayBuffer(base64);
-      }
-    }
-  } catch {}
-
-  // 4. Content URI fallback for small files
-  if (fileUriOrPath.startsWith("content://")) {
+  // 3. For confirmed small files only (0 < fileSize <= 20MB), fallback to ReactNativeBlobUtil
+  // Crucial: NEVER call readFile(cleanPath, 'base64') if fileSize is unverified or 0!
+  if (fileSize > 0 && fileSize <= MAX_SAFE_BUFFER_BYTES) {
     try {
-      const base64 = await FileSystem.readAsStringAsync(fileUriOrPath, {
-        encoding: "base64" as any,
-      });
-      if (base64) {
-        return base64ToArrayBuffer(base64);
+      const exists = await ReactNativeBlobUtil.fs.exists(cleanPath);
+      if (exists) {
+        const base64 = await ReactNativeBlobUtil.fs.readFile(cleanPath, "base64");
+        if (base64) {
+          return base64ToArrayBuffer(base64);
+        }
       }
-    } catch {}
+    } catch (err) {
+      console.warn("ReactNativeBlobUtil readFile fallback note:", err);
+    }
+
+    // 4. Content URI fallback for small files
+    if (fileUriOrPath.startsWith("content://")) {
+      try {
+        const base64 = await FileSystem.readAsStringAsync(fileUriOrPath, {
+          encoding: "base64" as any,
+        });
+        if (base64) {
+          return base64ToArrayBuffer(base64);
+        }
+      } catch {}
+    }
   }
 
   return null;
@@ -764,11 +768,18 @@ export async function pickPdfFromDevice(): Promise<PickedFileResult | null> {
     }
 
     const name = cleanDocumentName(rawName || "Document.pdf");
-    const assetSize = asset.size || 0;
+    let assetSize = asset.size || 0;
+    if (assetSize <= 0) {
+      try {
+        const info = await FileSystem.getInfoAsync(asset.uri);
+        assetSize = (info as any).size || 0;
+      } catch {}
+    }
+
     let buffer: ArrayBuffer | null = null;
 
-    // For files within safe memory limits (<= 25MB), load buffer for metadata
-    if (assetSize <= MAX_SAFE_BUFFER_BYTES) {
+    // For confirmed small files (0 < size <= 20MB), load buffer for metadata
+    if (assetSize > 0 && assetSize <= MAX_SAFE_BUFFER_BYTES) {
       try {
         const response = await fetch(asset.uri);
         buffer = await response.arrayBuffer();
@@ -783,7 +794,7 @@ export async function pickPdfFromDevice(): Promise<PickedFileResult | null> {
         }
       }
     } else {
-      // Large file (> 25MB): Stream directly from disk!
+      // Large file (> 20MB) or unverified size: Stream directly from disk!
       // Do not load into JS memory / Base64 to prevent Android 256MB heap crash
       console.warn(
         `[Memory Guard] Picked file is ${(assetSize / (1024 * 1024)).toFixed(

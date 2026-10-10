@@ -799,25 +799,30 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
 
   // 10. Open in Native System Viewer (Apple QuickLook / Android System PDF Reader)
   const handleOpenSystemViewer = async () => {
-    if (!pdfBytes) {
+    const targetSource = nativePdfUri || pdfBytes;
+    if (!targetSource || (typeof targetSource !== "string" && targetSource.byteLength === 0)) {
       onShowToast("PDF data not ready");
       return;
     }
     onShowToast("Opening in system viewer...");
-    const ok = await openInNativeSystemViewer(pdfBytes, activeTitle);
+    const ok = await openInNativeSystemViewer(targetSource, activeTitle);
     if (!ok && Platform.OS === "web") {
       onShowToast("Opened PDF in new browser tab");
     }
   };
 
-  // 11. Download Current PDF
+  // 11. Download / Export Current PDF
   const handleDownload = () => {
-    if (!pdfBytes) {
+    if (!pdfBytes && !nativePdfUri) {
       onShowToast("PDF data not ready");
       return;
     }
-    pdfStore.downloadPdf(pdfBytes, activeTitle);
-    onShowToast(`Downloaded ${activeTitle}`);
+    if (pdfBytes && pdfBytes.byteLength > 0) {
+      pdfStore.downloadPdf(pdfBytes, activeTitle);
+    } else if (nativePdfUri) {
+      void openInNativeSystemViewer(nativePdfUri, activeTitle);
+    }
+    onShowToast(`Exporting ${activeTitle}`);
   };
 
   // 11. Annotation & Stamping Handlers
