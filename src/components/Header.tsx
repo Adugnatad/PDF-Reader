@@ -67,10 +67,7 @@ export const Header: React.FC<HeaderProps> = ({
 
   return (
     <View
-      style={[
-        styles.headerContainer,
-        isLight && styles.headerContainerLight,
-      ]}
+      style={[styles.headerContainer, isLight && styles.headerContainerLight]}
     >
       <View style={styles.innerRow}>
         {/* Left Section: Back button & Title with Page Counter */}
@@ -91,13 +88,13 @@ export const Header: React.FC<HeaderProps> = ({
           )}
 
           <View style={styles.titleWrapper}>
-            <Text
+            {/* <Text
               style={[styles.titleText, isLight && styles.titleTextLight]}
               numberOfLines={1}
             >
               {title}
-            </Text>
-            {currentPage && numPages ? (
+            </Text> */}
+            {/* {currentPage && numPages ? (
               <View
                 style={[
                   styles.pageCountBadge,
@@ -113,7 +110,7 @@ export const Header: React.FC<HeaderProps> = ({
                   {currentPage}/{numPages}
                 </Text>
               </View>
-            ) : null}
+            ) : null} */}
           </View>
         </View>
 
@@ -122,7 +119,11 @@ export const Header: React.FC<HeaderProps> = ({
           {/* 1. Button for rotating the screen horizontal */}
           {onRotateHorizontal && (
             <TouchableOpacity
-              accessibilityLabel="Rotate screen horizontal"
+              accessibilityLabel={
+                isHorizontal
+                  ? "Rotate screen to portrait"
+                  : "Rotate screen to landscape"
+              }
               onPress={onRotateHorizontal}
               style={[
                 styles.iconButton,
@@ -133,10 +134,8 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <MaterialIcons
                 name="screen-rotation"
-                size={18}
-                color={
-                  isHorizontal ? "#0d0096" : isLight ? "#334155" : "#c7c4d7"
-                }
+                size={20}
+                color={isLight ? "#000" : "#c7c4d7"}
               />
             </TouchableOpacity>
           )}
@@ -151,8 +150,8 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <Ionicons
                 name="share-social-outline"
-                size={18}
-                color={isLight ? "#334155" : "#c7c4d7"}
+                size={20}
+                color={isLight ? "#000" : "#c7c4d7"}
               />
             </TouchableOpacity>
           )}
@@ -167,8 +166,8 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <Ionicons
                 name="print-outline"
-                size={18}
-                color={isLight ? "#334155" : "#c7c4d7"}
+                size={20}
+                color={isLight ? "#000" : "#c7c4d7"}
               />
             </TouchableOpacity>
           )}
@@ -189,10 +188,8 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <Ionicons
                 name={isNight ? "sunny" : "moon"}
-                size={18}
-                color={
-                  isNight ? "#f59e0b" : isLight ? "#2563eb" : "#dae2fd"
-                }
+                size={20}
+                color={isLight ? "#000" : "#dae2fd"}
               />
             </TouchableOpacity>
           )}
@@ -211,23 +208,14 @@ export const Header: React.FC<HeaderProps> = ({
             <Ionicons
               name="ellipsis-vertical"
               size={18}
-              color={
-                menuOpen
-                  ? "#0d0096"
-                  : isLight
-                    ? "#334155"
-                    : "#c7c4d7"
-              }
+              color={menuOpen ? "#0d0096" : isLight ? "#000" : "#c7c4d7"}
             />
           </TouchableOpacity>
 
           {/* Dropdown Menu */}
           {menuOpen && (
             <View
-              style={[
-                styles.dropdownMenu,
-                isLight && styles.dropdownMenuLight,
-              ]}
+              style={[styles.dropdownMenu, isLight && styles.dropdownMenuLight]}
             >
               {onToggleSearch && (
                 <TouchableOpacity
@@ -475,26 +463,16 @@ const styles = StyleSheet.create({
   iconButton: {
     width: 36,
     height: 36,
-    borderRadius: 9,
+    // borderRadius: 9,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#171f33",
     marginRight: 4,
-    borderWidth: 1,
-    borderColor: "rgba(45, 52, 73, 0.5)",
+    // borderWidth: 1,
+    // borderColor: "rgba(45, 52, 73, 0.5)",
   },
-  iconButtonLight: {
-    backgroundColor: "#f8fafc",
-    borderColor: "#e2e8f0",
-  },
-  iconButtonActive: {
-    backgroundColor: "#7bd0ff",
-    borderColor: "#7bd0ff",
-  },
-  iconButtonDarkActive: {
-    backgroundColor: "rgba(245, 158, 11, 0.12)",
-    borderColor: "rgba(245, 158, 11, 0.35)",
-  },
+  iconButtonLight: {},
+  iconButtonActive: {},
+  iconButtonDarkActive: {},
   titleText: {
     fontSize: 15,
     fontWeight: "600",

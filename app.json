@@ -4,7 +4,7 @@
     "slug": "docuflow-console",
     "version": "1.0.0",
     "scheme": "docuflow",
-    "orientation": "portrait",
+    "orientation": "default",
     "userInterfaceStyle": "dark",
     "splash": {
       "backgroundColor": "#0b1326"

@@ -16,10 +16,13 @@ import {
   Platform,
   Image,
   Dimensions,
+  useWindowDimensions,
   StatusBar,
   Animated,
+  BackHandler,
 } from "react-native";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
+import * as ScreenOrientation from "expo-screen-orientation";
 import { Header } from "./Header";
 import { ReaderTheme } from "../types";
 import { pdfStore } from "../services/pdfStore";
@@ -214,10 +217,65 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
   const [nativeScale, setNativeScale] = useState<number>(1.0);
   const [rotation, setRotation] = useState<number>(0);
   const [isHorizontal, setIsHorizontal] = useState<boolean>(false);
+  const isHorizontalRef = useRef(false);
+  const { height: windowHeight } = useWindowDimensions();
   const [showThumbnails, setShowThumbnails] = useState<boolean>(false);
   const [isBookmarked, setIsBookmarked] = useState<boolean>(false);
   const [showPagePicker, setShowPagePicker] = useState<boolean>(false);
   const [showBars, setShowBars] = useState<boolean>(true);
+
+  const restorePortrait = useCallback(async () => {
+    try {
+      if (Platform.OS !== "web") {
+        await ScreenOrientation.lockAsync(
+          ScreenOrientation.OrientationLock.PORTRAIT_UP,
+        );
+      } else {
+        setRotation(0);
+      }
+      isHorizontalRef.current = false;
+      setIsHorizontal(false);
+    } catch (error) {
+      console.warn("Could not restore portrait orientation:", error);
+      onShowToast("Could not change screen orientation");
+    }
+  }, [onShowToast]);
+
+  const handleBack = useCallback(() => {
+    if (isHorizontalRef.current) {
+      void restorePortrait().then(onBack);
+      return;
+    }
+    onBack();
+  }, [onBack, restorePortrait]);
+
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+
+    const subscription = BackHandler.addEventListener(
+      "hardwareBackPress",
+      () => {
+        if (!isHorizontalRef.current) return false;
+        void restorePortrait().then(onBack);
+        return true;
+      },
+    );
+
+    return () => subscription.remove();
+  }, [onBack, restorePortrait]);
+
+  useEffect(
+    () => () => {
+      if (Platform.OS !== "web" && isHorizontalRef.current) {
+        ScreenOrientation.lockAsync(
+          ScreenOrientation.OrientationLock.PORTRAIT_UP,
+        ).catch((error) => {
+          console.warn("Could not restore portrait orientation:", error);
+        });
+      }
+    },
+    [],
+  );
 
   // Smooth bar transitions that never trigger layout recalculation or native page blinks
   const barsAnim = useRef(new Animated.Value(1)).current;
@@ -717,14 +775,29 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
     });
   };
 
-  const handleRotateHorizontal = () => {
-    const next = !isHorizontal;
-    setIsHorizontal(next);
-    setRotation(next ? 90 : 0);
+  const handleRotateHorizontal = async () => {
+    const next = !isHorizontalRef.current;
+    try {
+      if (Platform.OS !== "web") {
+        await ScreenOrientation.lockAsync(
+          next
+            ? ScreenOrientation.OrientationLock.LANDSCAPE
+            : ScreenOrientation.OrientationLock.PORTRAIT_UP,
+        );
+      } else {
+        setRotation(next ? 90 : 0);
+      }
+      isHorizontalRef.current = next;
+      setIsHorizontal(next);
+    } catch (error) {
+      console.warn("Could not change screen orientation:", error);
+      onShowToast("Could not change screen orientation");
+      return;
+    }
     onShowToast(
       next
-        ? "Screen rotated to Horizontal (Landscape)"
-        : "Screen rotated to Vertical (Portrait)"
+        ? "Screen rotated to landscape"
+        : "Screen rotated to portrait"
     );
   };
 
@@ -1198,13 +1271,27 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
           !loadError &&
           !reflow &&
           (Platform.OS !== "web" || viewMode === "single") && (
-            <View style={styles.pageOuterWrapper}>
+            <View
+              style={[
+                styles.pageOuterWrapper,
+                {
+                  minHeight:
+                    Platform.OS !== "web"
+                      ? Math.max(0, windowHeight - 140)
+                      : undefined,
+                },
+              ]}
+            >
               <View
                 style={[
                   styles.pdfPaper,
                   {
                     backgroundColor: t.paperBg,
                     borderColor: "transparent",
+                    minHeight:
+                      Platform.OS !== "web"
+                        ? Math.max(0, windowHeight - 140)
+                        : undefined,
                     width:
                       Platform.OS === "web" && zoom > 1
                         ? `${Math.round(zoom * 100)}%`
@@ -1219,6 +1306,10 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                     {
                       width: "100%",
                       filter: t.canvasFilter as any,
+                      minHeight:
+                        Platform.OS !== "web"
+                          ? Math.max(0, windowHeight - 140)
+                          : undefined,
                     },
                   ]}
                   {...(Platform.OS === "web"
@@ -1613,7 +1704,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
       >
         <Header
           title={activeTitle}
-          onBack={onBack}
+          onBack={handleBack}
           onShowToast={onShowToast}
           onOpenFileFromDevice={handlePickAnotherPdf}
           onOpenSystemViewer={handleOpenSystemViewer}
