@@ -24,6 +24,7 @@ export interface PdfProps {
   source: Source | number;
   page?: number;
   scale?: number;
+  rotation?: number;
   minScale?: number;
   maxScale?: number;
   horizontal?: boolean;
@@ -65,6 +66,7 @@ const Pdf = forwardRef<any, PdfProps>((props, forwardedRef) => {
     source,
     page: propPage,
     scale = 1,
+    rotation = 0,
     fitPolicy = 0,
     style,
     onLoadComplete,
@@ -166,7 +168,7 @@ const Pdf = forwardRef<any, PdfProps>((props, forwardedRef) => {
         const pageObj = await doc.getPage(targetPage);
         if (isCancelled) return;
 
-        const baseViewport = pageObj.getViewport({ scale: 1.0 });
+        const baseViewport = pageObj.getViewport({ scale: 1.0, rotation });
 
         // Calculate fit-to-width scale so the PDF fills the screen completely
         let effectiveScale = scale;
@@ -177,7 +179,7 @@ const Pdf = forwardRef<any, PdfProps>((props, forwardedRef) => {
           effectiveScale = (parentWidth / baseViewport.width) * scale;
         }
 
-        const viewport = pageObj.getViewport({ scale: effectiveScale });
+        const viewport = pageObj.getViewport({ scale: effectiveScale, rotation });
         const canvas = localCanvasRef.current;
         if (!canvas) return;
 
@@ -230,7 +232,7 @@ const Pdf = forwardRef<any, PdfProps>((props, forwardedRef) => {
         currentRenderTask.current.cancel();
       }
     };
-  }, [doc, activePage, scale, containerWidth, fitPolicy]);
+  }, [doc, activePage, scale, rotation, containerWidth, fitPolicy]);
 
   return (
     <View

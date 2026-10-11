@@ -295,6 +295,12 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
     return list;
   }, [deviceFiles, searchQuery, sortBy, sortAsc, activeBottomTab]);
 
+  const getFilterHeading = () => {
+    if (activeBottomTab === "recent") return "Recent PDFs";
+    if (activeBottomTab === "favorite") return "Favorite PDFs";
+    return "All PDFs";
+  };
+
   const getHeaderTitle = () => {
     switch (activeBottomTab) {
       case "recent":
@@ -403,6 +409,7 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
               </TouchableOpacity>
             ) : null}
           </View>
+
         </View>
 
         {/* Main Files List Content */}
@@ -410,7 +417,7 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
           {/* Controls Bar */}
           <View style={styles.controlsBar}>
             <View style={styles.fileCountGroup}>
-              <Text style={styles.sectionHeading}>All PDFs</Text>
+              <Text style={styles.sectionHeading}>{getFilterHeading()}</Text>
               <Text style={styles.fileCountBadge}>
                 ({filteredFiles.length})
               </Text>
@@ -418,108 +425,108 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
 
             {/* Sort Button & Dropdown */}
             <View style={styles.sortContainer}>
-              <TouchableOpacity
-                onPress={() => setShowSortMenu(!showSortMenu)}
-                style={styles.sortButton}
-                activeOpacity={0.7}
-              >
-                <Ionicons
-                  name="swap-vertical-outline"
-                  size={15}
-                  color="#c7c4d7"
-                />
-                <Text style={styles.sortButtonText}>
-                  {sortBy === "date"
-                    ? "Date Modified"
-                    : sortBy === "name"
-                      ? "Name (A-Z)"
-                      : sortBy === "size"
-                        ? "File Size"
-                        : "Page Count"}
-                </Text>
-              </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => setShowSortMenu(!showSortMenu)}
+                  style={styles.sortButton}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons
+                    name="swap-vertical-outline"
+                    size={15}
+                    color="#c7c4d7"
+                  />
+                  <Text style={styles.sortButtonText}>
+                    {sortBy === "date"
+                      ? "Date"
+                      : sortBy === "name"
+                        ? "Name"
+                        : sortBy === "size"
+                          ? "Size"
+                          : "Pages"}
+                  </Text>
+                </TouchableOpacity>
 
-              {showSortMenu && (
-                <View style={styles.sortDropdown}>
-                  <TouchableOpacity
-                    onPress={() => {
-                      setSortBy("date");
-                      setSortAsc(!sortAsc);
-                      setShowSortMenu(false);
-                      onShowToast("Sorted by Date Modified");
-                    }}
-                    style={styles.sortItem}
-                  >
-                    <Text style={styles.sortItemText}>Date Modified</Text>
-                    {sortBy === "date" && (
-                      <Ionicons
-                        name={sortAsc ? "chevron-up" : "chevron-down"}
-                        size={14}
-                        color="#7bd0ff"
-                      />
-                    )}
-                  </TouchableOpacity>
+                {showSortMenu && (
+                  <View style={styles.sortDropdown}>
+                    <TouchableOpacity
+                      onPress={() => {
+                        setSortBy("date");
+                        setSortAsc(!sortAsc);
+                        setShowSortMenu(false);
+                        onShowToast("Sorted by Date Modified");
+                      }}
+                      style={styles.sortItem}
+                    >
+                      <Text style={styles.sortItemText}>Date Modified</Text>
+                      {sortBy === "date" && (
+                        <Ionicons
+                          name={sortAsc ? "chevron-up" : "chevron-down"}
+                          size={14}
+                          color="#7bd0ff"
+                        />
+                      )}
+                    </TouchableOpacity>
 
-                  <TouchableOpacity
-                    onPress={() => {
-                      setSortBy("name");
-                      setSortAsc(!sortAsc);
-                      setShowSortMenu(false);
-                      onShowToast("Sorted by Name");
-                    }}
-                    style={styles.sortItem}
-                  >
-                    <Text style={styles.sortItemText}>Name (A-Z)</Text>
-                    {sortBy === "name" && (
-                      <Ionicons
-                        name={sortAsc ? "chevron-up" : "chevron-down"}
-                        size={14}
-                        color="#7bd0ff"
-                      />
-                    )}
-                  </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => {
+                        setSortBy("name");
+                        setSortAsc(!sortAsc);
+                        setShowSortMenu(false);
+                        onShowToast("Sorted by Name");
+                      }}
+                      style={styles.sortItem}
+                    >
+                      <Text style={styles.sortItemText}>Name (A-Z)</Text>
+                      {sortBy === "name" && (
+                        <Ionicons
+                          name={sortAsc ? "chevron-up" : "chevron-down"}
+                          size={14}
+                          color="#7bd0ff"
+                        />
+                      )}
+                    </TouchableOpacity>
 
-                  <TouchableOpacity
-                    onPress={() => {
-                      setSortBy("size");
-                      setSortAsc(!sortAsc);
-                      setShowSortMenu(false);
-                      onShowToast("Sorted by File Size");
-                    }}
-                    style={styles.sortItem}
-                  >
-                    <Text style={styles.sortItemText}>File Size</Text>
-                    {sortBy === "size" && (
-                      <Ionicons
-                        name={sortAsc ? "chevron-up" : "chevron-down"}
-                        size={14}
-                        color="#7bd0ff"
-                      />
-                    )}
-                  </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => {
+                        setSortBy("size");
+                        setSortAsc(!sortAsc);
+                        setShowSortMenu(false);
+                        onShowToast("Sorted by File Size");
+                      }}
+                      style={styles.sortItem}
+                    >
+                      <Text style={styles.sortItemText}>File Size</Text>
+                      {sortBy === "size" && (
+                        <Ionicons
+                          name={sortAsc ? "chevron-up" : "chevron-down"}
+                          size={14}
+                          color="#7bd0ff"
+                        />
+                      )}
+                    </TouchableOpacity>
 
-                  <TouchableOpacity
-                    onPress={() => {
-                      setSortBy("pages");
-                      setSortAsc(!sortAsc);
-                      setShowSortMenu(false);
-                      onShowToast("Sorted by Page Count");
-                    }}
-                    style={styles.sortItem}
-                  >
-                    <Text style={styles.sortItemText}>Page Count</Text>
-                    {sortBy === "pages" && (
-                      <Ionicons
-                        name={sortAsc ? "chevron-up" : "chevron-down"}
-                        size={14}
-                        color="#7bd0ff"
-                      />
-                    )}
-                  </TouchableOpacity>
-                </View>
-              )}
+                    <TouchableOpacity
+                      onPress={() => {
+                        setSortBy("pages");
+                        setSortAsc(!sortAsc);
+                        setShowSortMenu(false);
+                        onShowToast("Sorted by Page Count");
+                      }}
+                      style={styles.sortItem}
+                    >
+                      <Text style={styles.sortItemText}>Page Count</Text>
+                      {sortBy === "pages" && (
+                        <Ionicons
+                          name={sortAsc ? "chevron-up" : "chevron-down"}
+                          size={14}
+                          color="#7bd0ff"
+                        />
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
             </View>
-          </View>
 
           {/* PDF Documents List */}
           <View style={styles.filesList}>
@@ -623,6 +630,7 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
                     style={styles.fileCard}
                     activeOpacity={0.7}
                   >
+
                     {/* Real PDF Document Page Preview */}
                     <PdfThumbnailPreview
                       fileId={file.id}

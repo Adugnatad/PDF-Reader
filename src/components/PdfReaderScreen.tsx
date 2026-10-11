@@ -213,6 +213,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
   const [zoom, setZoom] = useState<number>(1.0);
   const [nativeScale, setNativeScale] = useState<number>(1.0);
   const [rotation, setRotation] = useState<number>(0);
+  const [isHorizontal, setIsHorizontal] = useState<boolean>(false);
   const [showThumbnails, setShowThumbnails] = useState<boolean>(false);
   const [isBookmarked, setIsBookmarked] = useState<boolean>(false);
   const [showPagePicker, setShowPagePicker] = useState<boolean>(false);
@@ -716,6 +717,105 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
     });
   };
 
+  const handleRotateHorizontal = () => {
+    const next = !isHorizontal;
+    setIsHorizontal(next);
+    setRotation(next ? 90 : 0);
+    onShowToast(
+      next
+        ? "Screen rotated to Horizontal (Landscape)"
+        : "Screen rotated to Vertical (Portrait)"
+    );
+  };
+
+  const handleToggleTheme = () => {
+    const nextTheme: ReaderTheme = theme === "night" ? "light" : "night";
+    handleUpdateTheme(nextTheme);
+    onShowToast(
+      nextTheme === "night" ? "Dark Mode enabled" : "Light Mode enabled"
+    );
+  };
+
+  const handlePrint = async () => {
+    try {
+      onShowToast("Opening print preview...");
+      if (Platform.OS === "web" && typeof window !== "undefined") {
+        let printData = pdfBytes;
+        if (!printData) {
+          const item = await pdfStore.getPdfData(activeId);
+          printData = item.data;
+        }
+        if (
+          printData &&
+          typeof Blob !== "undefined" &&
+          typeof URL !== "undefined"
+        ) {
+          const blob = new Blob([printData as any], {
+            type: "application/pdf",
+          });
+          const blobUrl = URL.createObjectURL(blob);
+          const iframe = document.createElement("iframe");
+          iframe.style.position = "fixed";
+          iframe.style.right = "0";
+          iframe.style.bottom = "0";
+          iframe.style.width = "0";
+          iframe.style.height = "0";
+          iframe.style.border = "0";
+          iframe.src = blobUrl;
+          document.body.appendChild(iframe);
+          iframe.onload = () => {
+            setTimeout(() => {
+              try {
+                iframe.contentWindow?.focus();
+                iframe.contentWindow?.print();
+              } catch {
+                window.print();
+              }
+            }, 300);
+          };
+          return;
+        }
+        window.print();
+      } else {
+        onShowToast("Printing document...");
+      }
+    } catch {
+      if (typeof window !== "undefined") {
+        window.print();
+      }
+    }
+  };
+
+  const handleShare = async () => {
+    try {
+      if (
+        Platform.OS === "web" &&
+        typeof navigator !== "undefined" &&
+        navigator.share
+      ) {
+        await navigator.share({
+          title: activeTitle,
+          text: `Viewing ${activeTitle}`,
+          url: window.location.href,
+        });
+        onShowToast("Document shared");
+      } else if (
+        Platform.OS === "web" &&
+        typeof navigator !== "undefined" &&
+        navigator.clipboard
+      ) {
+        await navigator.clipboard.writeText(window.location.href);
+        onShowToast("Document link copied to clipboard");
+      } else {
+        onShowToast(`Sharing "${activeTitle}"`);
+      }
+    } catch (err: any) {
+      if (err?.name !== "AbortError") {
+        onShowToast("Document link copied to clipboard");
+      }
+    }
+  };
+
   // 8. Search Functionality
   const handleExecuteSearch = async () => {
     if (!pdfDoc || !searchQuery.trim()) return;
@@ -956,9 +1056,9 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
   const t = getThemeColors();
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: t.bg }]}>
       <StatusBar
-        barStyle="light-content"
+        barStyle={theme === "light" ? "dark-content" : "light-content"}
         translucent
         backgroundColor="transparent"
       />
@@ -1140,6 +1240,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                       ref={canvasRef as any}
                       source={pdfSource}
                       scale={Platform.OS === "web" ? zoom : nativeScale}
+                      {...({ rotation } as any)}
                       minScale={0.5}
                       maxScale={4.0}
                       fitPolicy={0}
@@ -1516,7 +1617,156 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
           onShowToast={onShowToast}
           onOpenFileFromDevice={handlePickAnotherPdf}
           onOpenSystemViewer={handleOpenSystemViewer}
+          onRotateHorizontal={handleRotateHorizontal}
+          isHorizontal={isHorizontal}
+          onShare={handleShare}
+          onPrint={handlePrint}
+          theme={theme}
+          onToggleTheme={handleToggleTheme}
+          currentPage={currentPage}
+          numPages={numPages}
+          searchOpen={searchOpen}
+          onToggleSearch={() => {
+            setSearchOpen((prev) => !prev);
+            if (!searchOpen) {
+              setShowThumbnails(false);
+            }
+          }}
+          showThumbnails={showThumbnails}
+          onToggleThumbnails={() => {
+            setShowThumbnails((prev) => !prev);
+            if (!showThumbnails) {
+              setSearchOpen(false);
+            }
+          }}
+          isBookmarked={isBookmarked}
+          onToggleBookmark={() => {
+            setIsBookmarked((prev) => {
+              const next = !prev;
+              onShowToast(next ? `Page ${currentPage} bookmarked` : "Bookmark removed");
+              return next;
+            });
+          }}
+          onOpenViewMode={() => setShowViewModeModal(true)}
+          onRotate={handleRotate}
+          onDownload={handleDownload}
         />
+
+        {/* Top Search Bar Drawer (Find in Document) */}
+        {searchOpen && (
+          <View style={styles.topSearchDrawer}>
+            <View style={styles.searchInnerRow}>
+              <Ionicons name="search" size={17} color="#7bd0ff" style={{ marginRight: 6 }} />
+              <TextInput
+                style={styles.searchDrawerInputField}
+                placeholder="Find in document..."
+                placeholderTextColor="#908fa0"
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                onSubmitEditing={handleExecuteSearch}
+                returnKeyType="search"
+                autoFocus
+              />
+              {isSearching && (
+                <ActivityIndicator size="small" color="#7bd0ff" style={{ marginHorizontal: 6 }} />
+              )}
+              {searchResults.length > 0 && (
+                <View style={styles.searchMatchCounter}>
+                  <Text style={styles.searchMatchText}>
+                    {searchIndex + 1}/{searchResults.length}
+                  </Text>
+                  <TouchableOpacity
+                    onPress={handlePrevSearchMatch}
+                    style={styles.searchChevronBtn}
+                    accessibilityLabel="Previous match"
+                  >
+                    <Ionicons name="chevron-up" size={16} color="#dae2fd" />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={handleNextSearchMatch}
+                    style={styles.searchChevronBtn}
+                    accessibilityLabel="Next match"
+                  >
+                    <Ionicons name="chevron-down" size={16} color="#dae2fd" />
+                  </TouchableOpacity>
+                </View>
+              )}
+              {searchQuery.trim().length > 0 && (
+                <TouchableOpacity
+                  onPress={handleExecuteSearch}
+                  style={styles.searchExecuteBtn}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.searchExecuteBtnText}>Find</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity
+                onPress={() => {
+                  setSearchOpen(false);
+                  setSearchQuery("");
+                  setSearchResults([]);
+                }}
+                style={styles.searchDrawerCloseBtn}
+                accessibilityLabel="Close search"
+              >
+                <Ionicons name="close" size={18} color="#908fa0" />
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
+        {/* Top Thumbnails Carousel Strip */}
+        {showThumbnails && !isLoading && !loadError && (
+          <View style={styles.topThumbnailStrip}>
+            <View style={styles.topThumbStripHeader}>
+              <View style={styles.thumbStripTitleGroup}>
+                <Ionicons name="albums-outline" size={15} color="#7bd0ff" />
+                <Text style={styles.topThumbStripTitle}>PAGES ({numPages})</Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setShowThumbnails(false)}
+                style={styles.thumbStripCloseBtn}
+              >
+                <Ionicons name="close" size={16} color="#908fa0" />
+              </TouchableOpacity>
+            </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.thumbScrollContainer}
+            >
+              {Array.from({ length: numPages }, (_, idx) => idx + 1).map((p) => {
+                const isCur = currentPage === p;
+                const thumbData = thumbnails[p];
+                return (
+                  <TouchableOpacity
+                    key={p}
+                    onPress={() => handleSelectPage(p)}
+                    style={[styles.thumbCardItem, isCur && styles.thumbCardItemActive]}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.thumbCardPreview}>
+                      {thumbData ? (
+                        <Image
+                          source={{ uri: thumbData }}
+                          style={styles.thumbCardImg}
+                          resizeMode="contain"
+                        />
+                      ) : (
+                        <View style={styles.thumbCardPlaceholder}>
+                          <Text style={styles.thumbCardNum}>{p}</Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text style={[styles.thumbCardLabel, isCur && styles.thumbCardLabelActive]}>
+                      P. {p}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        )}
       </Animated.View>
 
       {/* Docked Bottom Bar: Absolutely positioned overlay (ZERO layout shift / zero blinks on toggle) */}
@@ -2614,5 +2864,159 @@ const styles = StyleSheet.create({
     color: "#908fa0",
     fontSize: 11,
     fontWeight: "500",
+  },
+  topSearchDrawer: {
+    backgroundColor: "#131b2e",
+    borderBottomWidth: 1,
+    borderBottomColor: "#263554",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  searchInnerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#0b1326",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#263554",
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    maxWidth: 960,
+    alignSelf: "center",
+    width: "100%",
+  },
+  searchDrawerInputField: {
+    flex: 1,
+    color: "#dae2fd",
+    fontSize: 13,
+    paddingVertical: 4,
+    outlineStyle: "none" as any,
+  },
+  searchMatchCounter: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#171f33",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    gap: 4,
+    marginRight: 6,
+  },
+  searchMatchText: {
+    color: "#7bd0ff",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  searchChevronBtn: {
+    padding: 2,
+  },
+  searchExecuteBtn: {
+    backgroundColor: "#7bd0ff",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+    marginRight: 6,
+  },
+  searchExecuteBtnText: {
+    color: "#0d0096",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  searchDrawerCloseBtn: {
+    padding: 4,
+  },
+  topThumbnailStrip: {
+    backgroundColor: "rgba(11, 19, 38, 0.98)",
+    borderBottomWidth: 1,
+    borderBottomColor: "#263554",
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    maxHeight: 160,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.4,
+    shadowRadius: 10,
+    elevation: 10,
+  },
+  topThumbStripHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 8,
+    maxWidth: 960,
+    alignSelf: "center",
+    width: "100%",
+  },
+  thumbStripTitleGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  topThumbStripTitle: {
+    color: "#7bd0ff",
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+  },
+  thumbStripCloseBtn: {
+    padding: 3,
+  },
+  thumbScrollContainer: {
+    gap: 10,
+    alignItems: "center",
+    paddingHorizontal: 4,
+  },
+  thumbCardItem: {
+    width: 68,
+    alignItems: "center",
+    backgroundColor: "#171f33",
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: "#263554",
+    padding: 4,
+  },
+  thumbCardItemActive: {
+    borderColor: "#7bd0ff",
+    backgroundColor: "rgba(123, 208, 255, 0.12)",
+  },
+  thumbCardPreview: {
+    width: 58,
+    height: 72,
+    backgroundColor: "#ffffff",
+    borderRadius: 4,
+    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  thumbCardImg: {
+    width: "100%",
+    height: "100%",
+  },
+  thumbCardPlaceholder: {
+    width: "100%",
+    height: "100%",
+    backgroundColor: "#1e293b",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  thumbCardNum: {
+    color: "#94a3b8",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  thumbCardLabel: {
+    color: "#908fa0",
+    fontSize: 10,
+    fontWeight: "600",
+    marginTop: 4,
+  },
+  thumbCardLabelActive: {
+    color: "#7bd0ff",
+    fontWeight: "700",
   },
 });
