@@ -18,6 +18,7 @@ export default defineConfig(() => {
         'react-native-pdf': path.resolve(import.meta.dirname, 'src/components/react-native-pdf-web.tsx'),
         'react-native-safe-area-context': path.resolve(import.meta.dirname, 'src/safe-area-bridge.tsx'),
         'expo-splash-screen': path.resolve(import.meta.dirname, 'src/splash-screen-bridge.tsx'),
+        'expo-screen-orientation': path.resolve(import.meta.dirname, 'src/screen-orientation-bridge.ts'),
       },
       extensions: ['.web.tsx', '.web.ts', '.web.jsx', '.web.js', '.tsx', '.ts', '.jsx', '.js'],
     },

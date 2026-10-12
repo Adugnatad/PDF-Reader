@@ -1,16 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  ActivityIndicator,
   Animated,
   Platform,
   StyleSheet,
-  Text,
   View,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { FilesHomeScreen } from '../src/components/FilesHomeScreen';
+import { PdfSplashScreen } from '../src/components/PdfSplashScreen';
 import { DocFile } from '../src/types';
 import { useToast } from '../src/context/ToastContext';
 import { pdfStore } from '../src/services/pdfStore';
@@ -20,10 +18,9 @@ export default function IndexScreen() {
   const router = useRouter();
   const { showToast } = useToast();
   const [allFiles, setAllFiles] = useState<DocFile[]>(() => pdfStore.getUserFiles());
-  // On native devices, expo-splash-screen handles the single native splash screen.
-  // On web, the in-app splash overlay provides the single initial launch screen.
-  const [isSplashVisible, setIsSplashVisible] = useState(Platform.OS === 'web');
+  const [isSplashVisible, setIsSplashVisible] = useState(true);
   const fadeAnim = useRef(new Animated.Value(1)).current;
+  const progressAnim = useRef(new Animated.Value(0)).current;
 
   // Keep allFiles in sync with store additions / scan discoveries
   useEffect(() => {
@@ -35,11 +32,23 @@ export default function IndexScreen() {
     return unsubscribe;
   }, []);
 
-  // Single unified splash lifecycle until files are listed on the homescreen
+  // Loading screen lifecycle while PDF files are loaded & listed in the background
   useEffect(() => {
     let isMounted = true;
     const startTime = Date.now();
-    const MIN_SPLASH_MS = Platform.OS === 'web' ? 600 : 0;
+    const MIN_SPLASH_MS = 1200;
+
+    // Hide native splash immediately on native so our custom screen is shown
+    if (Platform.OS !== 'web') {
+      SplashScreen.hideAsync().catch(() => {});
+    }
+
+    // Animate progress smoothly towards 80% while files load
+    Animated.timing(progressAnim, {
+      toValue: 0.82,
+      duration: 850,
+      useNativeDriver: false,
+    }).start();
 
     const startup = async () => {
       try {
@@ -89,24 +98,26 @@ export default function IndexScreen() {
         const elapsed = Date.now() - startTime;
         const remaining = Math.max(0, MIN_SPLASH_MS - elapsed);
 
-        setTimeout(async () => {
+        setTimeout(() => {
           if (!isMounted) return;
 
-          // Hide native splash screen on native devices - revealing files on homescreen
-          if (Platform.OS !== 'web') {
-            await SplashScreen.hideAsync().catch(() => {});
-          } else {
-            // Smoothly fade out the single web splash screen into the homescreen
+          // Complete progress bar to 100%
+          Animated.timing(progressAnim, {
+            toValue: 1,
+            duration: 250,
+            useNativeDriver: false,
+          }).start(() => {
+            // Smoothly fade out the splash screen to reveal listed files on home screen
             Animated.timing(fadeAnim, {
               toValue: 0,
-              duration: 300,
+              duration: 350,
               useNativeDriver: false,
             }).start(() => {
               if (isMounted) {
                 setIsSplashVisible(false);
               }
             });
-          }
+          });
         }, remaining);
       }
     };
@@ -116,7 +127,7 @@ export default function IndexScreen() {
     return () => {
       isMounted = false;
     };
-  }, [fadeAnim]);
+  }, [fadeAnim, progressAnim]);
 
   const handleOpenFile = (file: DocFile) => {
     pdfStore.recordFileOpened(file.id);
@@ -135,48 +146,20 @@ export default function IndexScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Homescreen renders with listed files */}
+      {/* Homescreen renders with listed files in the background */}
       <FilesHomeScreen
         files={allFiles}
         onOpenFile={handleOpenFile}
         onShowToast={showToast}
       />
 
-      {/* Single splash screen displayed on web until files are ready and listed */}
-      {Platform.OS === 'web' && isSplashVisible && (
-        <Animated.View
-          style={[
-            styles.splashOverlay,
-            { opacity: fadeAnim },
-          ]}
-          pointerEvents={isSplashVisible ? 'auto' : 'none'}
-        >
-          <View style={styles.splashContent}>
-            {/* Brand Logo Box with soft glow */}
-            <View style={styles.iconContainer}>
-              <View style={styles.iconBackdrop} />
-              <Ionicons name="document-text" size={42} color="#ff516a" />
-            </View>
-
-            {/* Typography */}
-            <Text style={styles.splashTitle}>DocuFlow</Text>
-            <Text style={styles.splashSubtitle}>PDF & Document Reader</Text>
-
-            {/* Clean Loading Indicator */}
-            <View style={styles.loadingBox}>
-              <ActivityIndicator size="small" color="#ff516a" />
-              <Text style={styles.splashStatusText}>Loading document library...</Text>
-            </View>
-          </View>
-
-          {/* Footer branding */}
-          <View style={styles.splashFooter}>
-            <View style={styles.secureBadge}>
-              <Ionicons name="shield-checkmark" size={13} color="#7bd0ff" />
-              <Text style={styles.secureText}>Local Device Storage</Text>
-            </View>
-          </View>
-        </Animated.View>
+      {/* Loading Screen while PDF files are loaded & listed */}
+      {isSplashVisible && (
+        <PdfSplashScreen
+          visible={isSplashVisible}
+          fadeAnim={fadeAnim}
+          progressAnim={progressAnim}
+        />
       )}
     </View>
   );
@@ -188,96 +171,5 @@ const styles = StyleSheet.create({
     backgroundColor: '#0b1326',
     width: '100%',
     height: '100%',
-  },
-  splashOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: '#0b1326',
-    zIndex: 9999,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  splashContent: {
-    alignItems: 'center',
-    paddingHorizontal: 32,
-  },
-  iconContainer: {
-    width: 86,
-    height: 86,
-    borderRadius: 24,
-    backgroundColor: '#121d36',
-    borderWidth: 1.5,
-    borderColor: 'rgba(255, 81, 106, 0.35)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#ff516a',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.35,
-    shadowRadius: 18,
-    elevation: 12,
-    position: 'relative',
-  },
-  iconBackdrop: {
-    position: 'absolute',
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: 'rgba(255, 81, 106, 0.12)',
-  },
-  splashTitle: {
-    marginTop: 22,
-    fontSize: 28,
-    fontWeight: '800',
-    color: '#ffffff',
-    letterSpacing: -0.6,
-  },
-  splashSubtitle: {
-    marginTop: 6,
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#8e9ba0',
-    letterSpacing: 0.2,
-  },
-  loadingBox: {
-    marginTop: 36,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    backgroundColor: 'rgba(18, 29, 54, 0.75)',
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    borderRadius: 30,
-    borderWidth: 1,
-    borderColor: 'rgba(45, 52, 73, 0.4)',
-  },
-  splashStatusText: {
-    fontSize: 13,
-    color: '#dae2fd',
-    fontWeight: '500',
-  },
-  splashFooter: {
-    position: 'absolute',
-    bottom: 36,
-    alignItems: 'center',
-  },
-  secureBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(123, 208, 255, 0.08)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(123, 208, 255, 0.2)',
-  },
-  secureText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#7bd0ff',
-    letterSpacing: 0.3,
   },
 });
