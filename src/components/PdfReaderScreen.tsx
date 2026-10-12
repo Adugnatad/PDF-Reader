@@ -35,6 +35,8 @@ import {
   getPdfLocalUri,
   getCachedLocalUri,
   openInNativeSystemViewer,
+  shareNativePdf,
+  printNativePdf,
 } from "../services/nativePdfOpener";
 import {
   saveViewModeSettings,
@@ -811,80 +813,66 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
 
   const handlePrint = async () => {
     try {
-      onShowToast("Opening print preview...");
+      onShowToast("Opening print dialog...");
+      let targetBytes = pdfBytes;
+      let targetUri = nativePdfUri;
+      if (!targetBytes && !targetUri) {
+        const item = await pdfStore.getPdfData(activeId);
+        targetBytes = item.data;
+        if (item.nativeUri) targetUri = item.nativeUri;
+      }
+
+      const success = await printNativePdf(
+        targetUri || targetBytes || new Uint8Array(),
+        activeTitle,
+        isHorizontal
+      );
+
+      if (!success) {
+        if (Platform.OS === "web" && typeof window !== "undefined") {
+          window.print();
+        } else {
+          onShowToast("Unable to start printing");
+        }
+      }
+    } catch (err: any) {
+      console.warn("Print error:", err);
       if (Platform.OS === "web" && typeof window !== "undefined") {
-        let printData = pdfBytes;
-        if (!printData) {
-          const item = await pdfStore.getPdfData(activeId);
-          printData = item.data;
-        }
-        if (
-          printData &&
-          typeof Blob !== "undefined" &&
-          typeof URL !== "undefined"
-        ) {
-          const blob = new Blob([printData as any], {
-            type: "application/pdf",
-          });
-          const blobUrl = URL.createObjectURL(blob);
-          const iframe = document.createElement("iframe");
-          iframe.style.position = "fixed";
-          iframe.style.right = "0";
-          iframe.style.bottom = "0";
-          iframe.style.width = "0";
-          iframe.style.height = "0";
-          iframe.style.border = "0";
-          iframe.src = blobUrl;
-          document.body.appendChild(iframe);
-          iframe.onload = () => {
-            setTimeout(() => {
-              try {
-                iframe.contentWindow?.focus();
-                iframe.contentWindow?.print();
-              } catch {
-                window.print();
-              }
-            }, 300);
-          };
-          return;
-        }
         window.print();
       } else {
-        onShowToast("Printing document...");
-      }
-    } catch {
-      if (typeof window !== "undefined") {
-        window.print();
+        onShowToast("Unable to open print dialog");
       }
     }
   };
 
   const handleShare = async () => {
     try {
-      if (
-        Platform.OS === "web" &&
-        typeof navigator !== "undefined" &&
-        navigator.share
-      ) {
-        await navigator.share({
-          title: activeTitle,
-          text: `Viewing ${activeTitle}`,
-          url: window.location.href,
-        });
+      let targetBytes = pdfBytes;
+      let targetUri = nativePdfUri;
+      if (!targetBytes && !targetUri) {
+        const item = await pdfStore.getPdfData(activeId);
+        targetBytes = item.data;
+        if (item.nativeUri) targetUri = item.nativeUri;
+      }
+
+      onShowToast(`Sharing "${activeTitle}"...`);
+      const success = await shareNativePdf(
+        targetUri || targetBytes || new Uint8Array(),
+        activeTitle
+      );
+      if (success) {
         onShowToast("Document shared");
-      } else if (
-        Platform.OS === "web" &&
-        typeof navigator !== "undefined" &&
-        navigator.clipboard
-      ) {
-        await navigator.clipboard.writeText(window.location.href);
-        onShowToast("Document link copied to clipboard");
       } else {
-        onShowToast(`Sharing "${activeTitle}"`);
+        if (Platform.OS === "web" && typeof navigator !== "undefined" && navigator.clipboard) {
+          await navigator.clipboard.writeText(window.location.href);
+          onShowToast("Document link copied to clipboard");
+        } else {
+          onShowToast("Unable to share file");
+        }
       }
     } catch (err: any) {
       if (err?.name !== "AbortError") {
-        onShowToast("Document link copied to clipboard");
+        onShowToast(Platform.OS === "web" ? "Document link copied to clipboard" : "Share dismissed");
       }
     }
   };

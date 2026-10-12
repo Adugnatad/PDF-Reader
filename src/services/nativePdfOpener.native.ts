@@ -1,5 +1,7 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
+import * as Print from 'expo-print';
+import { Share as RNShare } from 'react-native';
 import { fastUint8ToBase64 } from '../utils/fastBase64';
 
 // Cache written URIs so we don't rewrite the same PDF repeatedly
@@ -102,3 +104,125 @@ export async function openInNativeSystemViewer(
     return false;
   }
 }
+
+/**
+ * Shares the PDF using native mobile share sheet (expo-sharing or RN Share fallback)
+ */
+export async function shareNativePdf(
+  pdfBytesOrUri: Uint8Array | ArrayBuffer | string,
+  fileName: string
+): Promise<boolean> {
+  try {
+    let fileUri: string;
+    if (typeof pdfBytesOrUri === 'string' && pdfBytesOrUri.length > 0) {
+      fileUri = pdfBytesOrUri;
+    } else {
+      const bytes =
+        pdfBytesOrUri instanceof Uint8Array || pdfBytesOrUri instanceof ArrayBuffer
+          ? pdfBytesOrUri
+          : new Uint8Array();
+      if (bytes.byteLength === 0) {
+        const cached = getCachedLocalUri(fileName);
+        if (cached) {
+          fileUri = cached;
+        } else {
+          return false;
+        }
+      } else {
+        fileUri = await getPdfLocalUri(bytes, fileName);
+      }
+    }
+
+    const available = await Sharing.isAvailableAsync().catch(() => false);
+    if (available) {
+      await Sharing.shareAsync(fileUri, {
+        mimeType: 'application/pdf',
+        UTI: 'com.adobe.pdf',
+        dialogTitle: `Share ${fileName}`,
+      });
+      return true;
+    }
+
+    // Fallback using React Native Share module
+    await RNShare.share({
+      title: fileName,
+      message: `Sharing ${fileName}`,
+      url: fileUri,
+    });
+    return true;
+  } catch (err: any) {
+    if (
+      err?.message?.includes('cancelled') ||
+      err?.message?.includes('dismissed') ||
+      err?.name === 'AbortError'
+    ) {
+      return true;
+    }
+    console.error('Failed to share PDF natively:', err);
+    return false;
+  }
+}
+
+/**
+ * Prints the PDF using native system print manager (AirPrint on iOS, Android Print Manager on Android)
+ */
+export async function printNativePdf(
+  pdfBytesOrUri: Uint8Array | ArrayBuffer | string,
+  fileName: string,
+  isHorizontal: boolean = false
+): Promise<boolean> {
+  try {
+    let fileUri: string | undefined;
+    if (typeof pdfBytesOrUri === 'string' && pdfBytesOrUri.length > 0) {
+      fileUri = pdfBytesOrUri;
+    } else {
+      const bytes =
+        pdfBytesOrUri instanceof Uint8Array || pdfBytesOrUri instanceof ArrayBuffer
+          ? pdfBytesOrUri
+          : new Uint8Array();
+      if (bytes.byteLength > 0) {
+        fileUri = await getPdfLocalUri(bytes, fileName);
+      } else {
+        const cached = getCachedLocalUri(fileName);
+        if (cached) {
+          fileUri = cached;
+        }
+      }
+    }
+
+    const orientation = isHorizontal
+      ? Print.Orientation.landscape
+      : Print.Orientation.portrait;
+
+    if (fileUri) {
+      await Print.printAsync({
+        uri: fileUri,
+        orientation,
+      });
+      return true;
+    } else if (typeof pdfBytesOrUri !== 'string') {
+      const bytes =
+        pdfBytesOrUri instanceof Uint8Array ? pdfBytesOrUri : new Uint8Array(pdfBytesOrUri);
+      if (bytes.byteLength > 0) {
+        const base64 = fastUint8ToBase64(bytes);
+        await Print.printAsync({
+          uri: `data:application/pdf;base64,${base64}`,
+          orientation,
+        });
+        return true;
+      }
+    }
+
+    return false;
+  } catch (err: any) {
+    if (
+      err?.message?.includes('cancelled') ||
+      err?.message?.includes('dismissed')
+    ) {
+      return true;
+    }
+    console.error('Failed to print PDF natively:', err);
+    return false;
+  }
+}
+
