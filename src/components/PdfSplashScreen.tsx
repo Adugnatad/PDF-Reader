@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
   Animated,
+  Easing,
   Platform,
   StatusBar,
   StyleSheet,
@@ -11,7 +12,7 @@ import {
 export interface PdfSplashScreenProps {
   visible: boolean;
   fadeAnim: Animated.Value;
-  progressAnim: Animated.Value;
+  progressAnim?: Animated.Value;
 }
 
 export const PdfSplashScreen: React.FC<PdfSplashScreenProps> = ({
@@ -19,6 +20,35 @@ export const PdfSplashScreen: React.FC<PdfSplashScreenProps> = ({
   fadeAnim,
   progressAnim,
 }) => {
+  const moveAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!visible) return;
+
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(moveAnim, {
+          toValue: 1,
+          duration: 1100,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: false,
+        }),
+        Animated.timing(moveAnim, {
+          toValue: 0,
+          duration: 1100,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: false,
+        }),
+      ])
+    );
+
+    animation.start();
+
+    return () => {
+      animation.stop();
+    };
+  }, [visible, moveAnim]);
+
   if (!visible) return null;
 
   return (
@@ -102,15 +132,15 @@ export const PdfSplashScreen: React.FC<PdfSplashScreenProps> = ({
         </Text>
       </View>
 
-      {/* Very Bottom Edge Loading Progress Bar */}
+      {/* Bottom Edge Animated Loading Bar (Moving Back and Forth) */}
       <View style={styles.progressTrack}>
         <Animated.View
           style={[
-            styles.progressFill,
+            styles.animatedBar,
             {
-              width: progressAnim.interpolate({
+              left: moveAnim.interpolate({
                 inputRange: [0, 1],
-                outputRange: ['0%', '100%'],
+                outputRange: ['0%', '70%'],
               }),
             },
           ]}
@@ -201,13 +231,17 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    height: 5,
+    height: 4.5,
     backgroundColor: '#FFCDD2',
     overflow: 'hidden',
     width: '100%',
   },
-  progressFill: {
-    height: '100%',
+  animatedBar: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    width: '30%',
     backgroundColor: '#E5252A',
+    borderRadius: 3,
   },
 });

@@ -20,7 +20,6 @@ export default function IndexScreen() {
   const [allFiles, setAllFiles] = useState<DocFile[]>(() => pdfStore.getUserFiles());
   const [isSplashVisible, setIsSplashVisible] = useState(true);
   const fadeAnim = useRef(new Animated.Value(1)).current;
-  const progressAnim = useRef(new Animated.Value(0)).current;
 
   // Keep allFiles in sync with store additions / scan discoveries
   useEffect(() => {
@@ -42,13 +41,6 @@ export default function IndexScreen() {
     if (Platform.OS !== 'web') {
       SplashScreen.hideAsync().catch(() => {});
     }
-
-    // Animate progress smoothly towards 80% while files load
-    Animated.timing(progressAnim, {
-      toValue: 0.82,
-      duration: 850,
-      useNativeDriver: false,
-    }).start();
 
     const startup = async () => {
       try {
@@ -101,22 +93,15 @@ export default function IndexScreen() {
         setTimeout(() => {
           if (!isMounted) return;
 
-          // Complete progress bar to 100%
-          Animated.timing(progressAnim, {
-            toValue: 1,
-            duration: 250,
+          // Smoothly fade out the splash screen to reveal listed files on home screen
+          Animated.timing(fadeAnim, {
+            toValue: 0,
+            duration: 400,
             useNativeDriver: false,
           }).start(() => {
-            // Smoothly fade out the splash screen to reveal listed files on home screen
-            Animated.timing(fadeAnim, {
-              toValue: 0,
-              duration: 350,
-              useNativeDriver: false,
-            }).start(() => {
-              if (isMounted) {
-                setIsSplashVisible(false);
-              }
-            });
+            if (isMounted) {
+              setIsSplashVisible(false);
+            }
           });
         }, remaining);
       }
@@ -127,7 +112,7 @@ export default function IndexScreen() {
     return () => {
       isMounted = false;
     };
-  }, [fadeAnim, progressAnim]);
+  }, [fadeAnim]);
 
   const handleOpenFile = (file: DocFile) => {
     pdfStore.recordFileOpened(file.id);
@@ -158,7 +143,6 @@ export default function IndexScreen() {
         <PdfSplashScreen
           visible={isSplashVisible}
           fadeAnim={fadeAnim}
-          progressAnim={progressAnim}
         />
       )}
     </View>
