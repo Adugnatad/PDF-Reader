@@ -243,7 +243,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
 
   const handleBack = useCallback(() => {
     if (isHorizontalRef.current) {
-      void restorePortrait().then(onBack);
+      void restorePortrait();
       return;
     }
     onBack();
@@ -256,13 +256,13 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
       "hardwareBackPress",
       () => {
         if (!isHorizontalRef.current) return false;
-        void restorePortrait().then(onBack);
+        void restorePortrait();
         return true;
       },
     );
 
     return () => subscription.remove();
-  }, [onBack, restorePortrait]);
+  }, [restorePortrait]);
 
   useEffect(
     () => () => {
