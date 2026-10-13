@@ -68,7 +68,8 @@ export async function promptAndScanDeviceStorage(): Promise<
  * Uses window.showOpenFilePicker when available, falling back to a hidden file input.
  */
 export async function pickPdfFromDevice(): Promise<PickedFileResult | null> {
-  if (typeof window !== "undefined" && "showOpenFilePicker" in window) {
+  const isInsideIframe = typeof window !== 'undefined' && window.self !== window.top;
+  if (!isInsideIframe && typeof window !== "undefined" && "showOpenFilePicker" in window) {
     try {
       const [handle] = await (window as any).showOpenFilePicker({
         multiple: false,

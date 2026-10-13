@@ -12,10 +12,7 @@ import {
   PanResponder,
   Animated,
   Platform,
-  Image,
-  TouchableOpacity,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { ReaderTheme } from '../types';
 
 interface PdfSideScrubberProps {
@@ -30,20 +27,20 @@ interface PdfSideScrubberProps {
   docTitle?: string;
 }
 
-const THUMB_HEIGHT = 54;
-const TOUCH_AREA_WIDTH = 44; // Touch target width for native mobile thumbs
-const BUBBLE_WIDTH = 154;
+const WIDGET_HEIGHT = 54;
+const WIDGET_WIDTH = 92;
+const CIRCLE_SIZE = 54;
+const PILL_WIDTH = 48;
+const PILL_HEIGHT = 48;
 
 export const PdfSideScrubber: React.FC<PdfSideScrubberProps> = ({
   currentPage,
   numPages,
   onPageChange,
-  topOffset = 84,
+  topOffset = 74,
   bottomOffset = 84,
-  theme = 'night',
-  thumbnails = {},
+  theme = 'light',
   visible = true,
-  docTitle,
 }) => {
   const [trackHeight, setTrackHeight] = useState<number>(0);
   const [isDragging, setIsDragging] = useState<boolean>(false);
@@ -53,10 +50,8 @@ export const PdfSideScrubber: React.FC<PdfSideScrubberProps> = ({
   // Animated values for 60 FPS transitions
   const thumbY = useRef(new Animated.Value(0)).current;
   const currentThumbYRef = useRef<number>(0);
-  const bubbleScale = useRef(new Animated.Value(0)).current;
-  const bubbleOpacity = useRef(new Animated.Value(0)).current;
-  const railOpacity = useRef(new Animated.Value(0.75)).current;
-  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const widgetScale = useRef(new Animated.Value(1)).current;
+  const widgetOpacity = useRef(new Animated.Value(0.95)).current;
   const lastHapticPageRef = useRef<number>(currentPage);
   const trackRef = useRef<any>(null);
 
@@ -70,12 +65,12 @@ export const PdfSideScrubber: React.FC<PdfSideScrubberProps> = ({
     };
   }, [thumbY]);
 
-  // Available vertical distance the thumb can travel
+  // Usable travel distance along the vertical side rail
   const availableTravel = useMemo(() => {
-    return Math.max(1, trackHeight - THUMB_HEIGHT);
+    return Math.max(1, trackHeight - WIDGET_HEIGHT);
   }, [trackHeight]);
 
-  // Synchronize thumb position when currentPage changes externally (scrolling, taps, keyboard)
+  // Synchronize scrubber position when currentPage changes externally (scrolling, taps, keyboard)
   useEffect(() => {
     if (isDraggingRef.current || trackHeight <= 0 || numPages <= 1) return;
 
@@ -84,7 +79,7 @@ export const PdfSideScrubber: React.FC<PdfSideScrubberProps> = ({
 
     Animated.spring(thumbY, {
       toValue: targetY,
-      tension: 120,
+      tension: 130,
       friction: 14,
       useNativeDriver: Platform.OS !== 'web',
     }).start();
@@ -98,7 +93,7 @@ export const PdfSideScrubber: React.FC<PdfSideScrubberProps> = ({
       lastHapticPageRef.current = newPage;
       if (typeof navigator !== 'undefined' && navigator.vibrate) {
         try {
-          navigator.vibrate(6);
+          navigator.vibrate(8);
         } catch {
           // ignore
         }
@@ -106,61 +101,21 @@ export const PdfSideScrubber: React.FC<PdfSideScrubberProps> = ({
     }
   }, []);
 
-  // Show page number bubble with pop-in spring animation
-  const showBubble = useCallback(() => {
-    if (hideTimerRef.current) {
-      clearTimeout(hideTimerRef.current);
-      hideTimerRef.current = null;
-    }
-
+  const animateActiveState = useCallback((active: boolean) => {
     Animated.parallel([
-      Animated.spring(bubbleScale, {
-        toValue: 1,
-        tension: 180,
-        friction: 11,
+      Animated.spring(widgetScale, {
+        toValue: active ? 1.06 : 1,
+        tension: 200,
+        friction: 12,
         useNativeDriver: Platform.OS !== 'web',
       }),
-      Animated.timing(bubbleOpacity, {
+      Animated.timing(widgetOpacity, {
         toValue: 1,
-        duration: 130,
-        useNativeDriver: Platform.OS !== 'web',
-      }),
-      Animated.timing(railOpacity, {
-        toValue: 1,
-        duration: 120,
+        duration: 100,
         useNativeDriver: Platform.OS !== 'web',
       }),
     ]).start();
-  }, [bubbleScale, bubbleOpacity, railOpacity]);
-
-  // Smoothly fade out bubble after user finishes scrubbing
-  const scheduleHideBubble = useCallback(
-    (delayMs = 1200) => {
-      if (hideTimerRef.current) {
-        clearTimeout(hideTimerRef.current);
-      }
-      hideTimerRef.current = setTimeout(() => {
-        Animated.parallel([
-          Animated.timing(bubbleScale, {
-            toValue: 0.85,
-            duration: 200,
-            useNativeDriver: Platform.OS !== 'web',
-          }),
-          Animated.timing(bubbleOpacity, {
-            toValue: 0,
-            duration: 200,
-            useNativeDriver: Platform.OS !== 'web',
-          }),
-          Animated.timing(railOpacity, {
-            toValue: 0.65,
-            duration: 280,
-            useNativeDriver: Platform.OS !== 'web',
-          }),
-        ]).start();
-      }, delayMs);
-    },
-    [bubbleScale, bubbleOpacity, railOpacity],
-  );
+  }, [widgetScale, widgetOpacity]);
 
   // Convert vertical track pixel position to clamped page number
   const calculatePageFromY = useCallback(
@@ -177,7 +132,7 @@ export const PdfSideScrubber: React.FC<PdfSideScrubberProps> = ({
     [numPages, availableTravel],
   );
 
-  // Throttled page scrubbing update
+  // Throttled page scrubbing update for buttery rendering
   const scrubThrottleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingPageRef = useRef<number>(currentPage);
 
@@ -191,7 +146,7 @@ export const PdfSideScrubber: React.FC<PdfSideScrubberProps> = ({
         scrubThrottleTimer.current = setTimeout(() => {
           scrubThrottleTimer.current = null;
           onPageChange(pendingPageRef.current);
-        }, 40);
+        }, 35);
       }
     },
     [onPageChange, triggerHaptic],
@@ -208,14 +163,14 @@ export const PdfSideScrubber: React.FC<PdfSideScrubberProps> = ({
         onMoveShouldSetPanResponder: () => numPages > 1,
         onMoveShouldSetPanResponderCapture: () => numPages > 1,
 
-        onPanResponderGrant: (evt, gestureState) => {
+        onPanResponderGrant: (evt) => {
           if (numPages <= 1) return;
           setIsDragging(true);
           isDraggingRef.current = true;
-          showBubble();
+          animateActiveState(true);
 
           const touchY = evt.nativeEvent.locationY;
-          const initialY = touchY - THUMB_HEIGHT / 2;
+          const initialY = touchY - WIDGET_HEIGHT / 2;
           const { page, clampedY } = calculatePageFromY(initialY);
 
           panStartOffset.current = clampedY;
@@ -240,6 +195,7 @@ export const PdfSideScrubber: React.FC<PdfSideScrubberProps> = ({
         onPanResponderRelease: () => {
           setIsDragging(false);
           isDraggingRef.current = false;
+          animateActiveState(false);
 
           if (scrubThrottleTimer.current) {
             clearTimeout(scrubThrottleTimer.current);
@@ -248,13 +204,12 @@ export const PdfSideScrubber: React.FC<PdfSideScrubberProps> = ({
 
           const finalPage = pendingPageRef.current;
           onPageChange(finalPage);
-          scheduleHideBubble(1400);
         },
 
         onPanResponderTerminate: () => {
           setIsDragging(false);
           isDraggingRef.current = false;
-          scheduleHideBubble(600);
+          animateActiveState(false);
         },
       }),
     [
@@ -262,8 +217,7 @@ export const PdfSideScrubber: React.FC<PdfSideScrubberProps> = ({
       calculatePageFromY,
       applyPageScrub,
       onPageChange,
-      showBubble,
-      scheduleHideBubble,
+      animateActiveState,
       thumbY,
     ],
   );
@@ -279,11 +233,11 @@ export const PdfSideScrubber: React.FC<PdfSideScrubberProps> = ({
 
     setIsDragging(true);
     isDraggingRef.current = true;
-    showBubble();
+    animateActiveState(true);
 
     const rect = e.currentTarget.getBoundingClientRect();
     const touchY = e.clientY - rect.top;
-    const initialY = touchY - THUMB_HEIGHT / 2;
+    const initialY = touchY - WIDGET_HEIGHT / 2;
     const { page, clampedY } = calculatePageFromY(initialY);
 
     panStartOffset.current = clampedY;
@@ -298,7 +252,7 @@ export const PdfSideScrubber: React.FC<PdfSideScrubberProps> = ({
 
     const rect = e.currentTarget.getBoundingClientRect();
     const touchY = e.clientY - rect.top;
-    const initialY = touchY - THUMB_HEIGHT / 2;
+    const initialY = touchY - WIDGET_HEIGHT / 2;
     const { page, clampedY } = calculatePageFromY(initialY);
 
     thumbY.setValue(clampedY);
@@ -317,6 +271,7 @@ export const PdfSideScrubber: React.FC<PdfSideScrubberProps> = ({
 
     setIsDragging(false);
     isDraggingRef.current = false;
+    animateActiveState(false);
 
     if (scrubThrottleTimer.current) {
       clearTimeout(scrubThrottleTimer.current);
@@ -325,32 +280,11 @@ export const PdfSideScrubber: React.FC<PdfSideScrubberProps> = ({
 
     const finalPage = pendingPageRef.current;
     onPageChange(finalPage);
-    scheduleHideBubble(1400);
-  };
-
-  // Quick jump button for top page (1) and bottom page (numPages)
-  const handleJumpToFirst = () => {
-    if (numPages <= 1) return;
-    showBubble();
-    thumbY.setValue(0);
-    onPageChange(1);
-    setScrubPage(1);
-    scheduleHideBubble(1200);
-  };
-
-  const handleJumpToLast = () => {
-    if (numPages <= 1) return;
-    showBubble();
-    thumbY.setValue(availableTravel);
-    onPageChange(numPages);
-    setScrubPage(numPages);
-    scheduleHideBubble(1200);
   };
 
   // Cleanup timers on unmount
   useEffect(() => {
     return () => {
-      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
       if (scrubThrottleTimer.current) clearTimeout(scrubThrottleTimer.current);
     };
   }, []);
@@ -359,54 +293,24 @@ export const PdfSideScrubber: React.FC<PdfSideScrubberProps> = ({
     return null;
   }
 
-  // Theme-adaptive color palette
+  // Theme-adaptive colors for the page bubble container
   const themeStyles = {
     light: {
-      railBg: 'rgba(15, 23, 42, 0.1)',
-      railBorder: 'rgba(15, 23, 42, 0.15)',
-      thumbBg: isDragging ? '#2563eb' : '#3b82f6',
-      thumbGlow: 'rgba(37, 99, 235, 0.45)',
-      thumbBorder: '#ffffff',
-      bubbleBg: '#0f172a',
-      bubbleBorder: '#334155',
-      bubbleArrow: '#0f172a',
-      pageText: '#f8fafc',
-      totalText: '#94a3b8',
-      pctBadgeBg: 'rgba(59, 130, 246, 0.25)',
-      pctBadgeText: '#60a5fa',
+      pillBg: '#e8ecf4',
+      pillBorder: 'rgba(0, 0, 0, 0.08)',
+      pageTextColor: '#334155',
     },
     sepia: {
-      railBg: 'rgba(120, 80, 40, 0.14)',
-      railBorder: 'rgba(120, 80, 40, 0.22)',
-      thumbBg: isDragging ? '#b45309' : '#d97706',
-      thumbGlow: 'rgba(180, 83, 9, 0.45)',
-      thumbBorder: '#fef3c7',
-      bubbleBg: '#292524',
-      bubbleBorder: '#57534e',
-      bubbleArrow: '#292524',
-      pageText: '#fef3c7',
-      totalText: '#d6d3d1',
-      pctBadgeBg: 'rgba(217, 119, 6, 0.25)',
-      pctBadgeText: '#fcd34d',
+      pillBg: '#ece4d5',
+      pillBorder: 'rgba(70, 50, 30, 0.1)',
+      pageTextColor: '#3c3226',
     },
     night: {
-      railBg: 'rgba(255, 255, 255, 0.1)',
-      railBorder: 'rgba(255, 255, 255, 0.16)',
-      thumbBg: isDragging ? '#7bd0ff' : '#60a5fa',
-      thumbGlow: 'rgba(123, 208, 255, 0.5)',
-      thumbBorder: '#ffffff',
-      bubbleBg: '#091124',
-      bubbleBorder: '#233355',
-      bubbleArrow: '#091124',
-      pageText: '#ffffff',
-      totalText: '#8fa0c0',
-      pctBadgeBg: 'rgba(123, 208, 255, 0.22)',
-      pctBadgeText: '#7bd0ff',
+      pillBg: '#1e293b',
+      pillBorder: 'rgba(255, 255, 255, 0.12)',
+      pageTextColor: '#f8fafc',
     },
   }[theme];
-
-  const currentPercent = Math.round(((scrubPage - 1) / (numPages - 1 || 1)) * 100);
-  const activeThumbnail = thumbnails[scrubPage];
 
   return (
     <View
@@ -419,15 +323,10 @@ export const PdfSideScrubber: React.FC<PdfSideScrubberProps> = ({
       ]}
       pointerEvents="box-none"
     >
-      {/* Draggable Vertical Scrubber Rail Track */}
-      <Animated.View
+      {/* Vertical Interactive Track Area along right edge */}
+      <View
         ref={trackRef}
-        style={[
-          styles.trackWrapper,
-          {
-            opacity: railOpacity,
-          },
-        ]}
+        style={styles.trackWrapper}
         onLayout={(e) => {
           const height = e.nativeEvent.layout.height;
           if (height > 0 && Math.abs(height - trackHeight) > 2) {
@@ -444,161 +343,50 @@ export const PdfSideScrubber: React.FC<PdfSideScrubberProps> = ({
             }
           : {})}
       >
-        {/* Subtle Vertical Rail Guide */}
-        <View
-          style={[
-            styles.railLine,
-            {
-              backgroundColor: themeStyles.railBg,
-              borderColor: themeStyles.railBorder,
-            },
-          ]}
-        />
-
-        {/* Top Micro Marker (Jump to Page 1) */}
-        <TouchableOpacity
-          onPress={handleJumpToFirst}
-          style={styles.topMicroLabel}
-          hitSlop={{ top: 8, bottom: 8, left: 10, right: 10 }}
-          accessibilityLabel="Jump to first page"
-        >
-          <Text style={[styles.microText, { color: themeStyles.totalText }]}>1</Text>
-        </TouchableOpacity>
-
-        {/* Bottom Micro Marker (Jump to Last Page) */}
-        <TouchableOpacity
-          onPress={handleJumpToLast}
-          style={styles.bottomMicroLabel}
-          hitSlop={{ top: 8, bottom: 8, left: 10, right: 10 }}
-          accessibilityLabel="Jump to last page"
-        >
-          <Text style={[styles.microText, { color: themeStyles.totalText }]}>
-            {numPages}
-          </Text>
-        </TouchableOpacity>
-
-        {/* Draggable Bar / Thumb Capsule */}
+        {/* The Exact Scrubber Widget from the Reference Screenshot */}
         <Animated.View
           style={[
-            styles.thumbHandleWrapper,
+            styles.scrubberWidget,
             {
-              transform: [{ translateY: thumbY }],
+              transform: [
+                { translateY: thumbY },
+                { scale: widgetScale },
+              ],
+              opacity: widgetOpacity,
             },
           ]}
           pointerEvents="none"
         >
+          {/* Light Grey Page Number Bubble attached flush to right screen edge */}
           <View
             style={[
-              styles.thumbBar,
+              styles.pagePillContainer,
               {
-                backgroundColor: themeStyles.thumbBg,
-                borderColor: themeStyles.thumbBorder,
-                shadowColor: themeStyles.thumbGlow,
-                width: isDragging ? 10 : 7,
+                backgroundColor: themeStyles.pillBg,
+                borderColor: themeStyles.pillBorder,
               },
             ]}
           >
-            {/* Native Gripper Ribs */}
-            <View style={styles.gripLinesContainer}>
-              <View style={styles.gripLine} />
-              <View style={styles.gripLine} />
-              <View style={styles.gripLine} />
+            <Text
+              style={[
+                styles.pageNumberText,
+                { color: themeStyles.pageTextColor },
+              ]}
+              numberOfLines={1}
+            >
+              {scrubPage}
+            </Text>
+          </View>
+
+          {/* Red Circle Grab Handle with Two Horizontal White Grip Bars */}
+          <View style={styles.redCircleHandle}>
+            <View style={styles.gripBarsContainer}>
+              <View style={styles.gripBar} />
+              <View style={styles.gripBar} />
             </View>
           </View>
         </Animated.View>
-      </Animated.View>
-
-      {/* Floating Page Number Bubble Callout (anchored directly to Thumb Y) */}
-      <Animated.View
-        style={[
-          styles.bubbleWrapper,
-          {
-            transform: [
-              { translateY: thumbY },
-              { scale: bubbleScale },
-            ],
-            opacity: bubbleOpacity,
-          },
-        ]}
-        pointerEvents="none"
-      >
-        <View
-          style={[
-            styles.bubbleCard,
-            {
-              backgroundColor: themeStyles.bubbleBg,
-              borderColor: themeStyles.bubbleBorder,
-            },
-          ]}
-        >
-          {/* Mini Page Thumbnail Preview Card if available */}
-          {activeThumbnail ? (
-            <View style={styles.thumbnailPreviewWrap}>
-              <Image
-                source={{ uri: activeThumbnail }}
-                style={styles.thumbnailImage}
-                resizeMode="cover"
-              />
-              <View style={styles.thumbPageBadge}>
-                <Text style={styles.thumbPageBadgeText}>P. {scrubPage}</Text>
-              </View>
-            </View>
-          ) : null}
-
-          {/* Header Row: Label & Progress % */}
-          <View style={styles.bubbleHeaderRow}>
-            <View style={styles.bubbleLabelGroup}>
-              <Ionicons name="document-text" size={10} color={themeStyles.pctBadgeText} />
-              <Text style={[styles.bubblePageLabel, { color: themeStyles.totalText }]}>
-                PAGE
-              </Text>
-            </View>
-            <View
-              style={[
-                styles.pctBadge,
-                { backgroundColor: themeStyles.pctBadgeBg },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.pctBadgeText,
-                  { color: themeStyles.pctBadgeText },
-                ]}
-              >
-                {currentPercent}%
-              </Text>
-            </View>
-          </View>
-
-          {/* Large Numbers: e.g. "12 / 48" */}
-          <View style={styles.bubbleNumbersRow}>
-            <Text style={[styles.bubblePageNumber, { color: themeStyles.pageText }]}>
-              {scrubPage}
-            </Text>
-            <Text style={[styles.bubbleTotalNumber, { color: themeStyles.totalText }]}>
-              {' '}/ {numPages}
-            </Text>
-          </View>
-
-          {/* Scrubbing status line */}
-          <View style={styles.scrubbingIndicatorRow}>
-            <Ionicons name="swap-vertical" size={10} color={themeStyles.pctBadgeText} />
-            <Text style={[styles.scrubHint, { color: themeStyles.totalText }]}>
-              {isDragging ? 'Dragging to scrub' : 'Scrubber bar'}
-            </Text>
-          </View>
-
-          {/* Callout Arrow Pointer towards Draggable Bar */}
-          <View
-            style={[
-              styles.bubbleArrow,
-              {
-                borderLeftColor: themeStyles.bubbleBg,
-              },
-            ]}
-          />
-        </View>
-      </Animated.View>
+      </View>
     </View>
   );
 };
@@ -607,195 +395,76 @@ const styles = StyleSheet.create({
   container: {
     position: 'absolute',
     right: 0,
-    width: TOUCH_AREA_WIDTH,
+    width: WIDGET_WIDTH,
     zIndex: 9999,
   },
   trackWrapper: {
     position: 'absolute',
-    top: 6,
-    bottom: 6,
+    top: 0,
+    bottom: 0,
     right: 0,
-    width: TOUCH_AREA_WIDTH,
-    alignItems: 'center',
+    width: WIDGET_WIDTH,
     justifyContent: 'flex-start',
   },
-  railLine: {
-    position: 'absolute',
-    top: 18,
-    bottom: 18,
-    right: 14,
-    width: 3,
-    borderRadius: 2,
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  topMicroLabel: {
-    position: 'absolute',
-    top: 0,
-    right: 11,
-    paddingVertical: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  bottomMicroLabel: {
-    position: 'absolute',
-    bottom: 0,
-    right: 9,
-    paddingVertical: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  microText: {
-    fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
-  thumbHandleWrapper: {
+  scrubberWidget: {
     position: 'absolute',
     top: 0,
     right: 0,
-    width: TOUCH_AREA_WIDTH,
-    height: THUMB_HEIGHT,
+    width: WIDGET_WIDTH,
+    height: WIDGET_HEIGHT,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  thumbBar: {
-    height: THUMB_HEIGHT - 6,
-    borderRadius: 5,
-    borderWidth: 1.2,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowOffset: { width: -2, height: 2 },
-    shadowOpacity: 0.6,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  gripLinesContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 3,
-  },
-  gripLine: {
-    width: 4,
-    height: 1.5,
-    backgroundColor: 'rgba(255, 255, 255, 0.75)',
-    borderRadius: 1,
-  },
-  bubbleWrapper: {
+  /* Grey bubble that touches the right screen edge */
+  pagePillContainer: {
     position: 'absolute',
-    right: TOUCH_AREA_WIDTH + 2,
-    top: 0,
-    height: THUMB_HEIGHT,
+    right: 0,
+    width: PILL_WIDTH,
+    height: PILL_HEIGHT,
+    borderTopLeftRadius: 18,
+    borderBottomLeftRadius: 18,
+    borderWidth: 1,
     justifyContent: 'center',
-    alignItems: 'flex-end',
-  },
-  bubbleCard: {
-    minWidth: 122,
-    maxWidth: BUBBLE_WIDTH,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 14,
-    borderWidth: 1.2,
-    flexDirection: 'column',
+    alignItems: 'center',
+    paddingLeft: 10,
     shadowColor: '#000000',
-    shadowOffset: { width: -3, height: 5 },
-    shadowOpacity: 0.5,
-    shadowRadius: 16,
-    elevation: 14,
-    position: 'relative',
+    shadowOffset: { width: -1, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 3,
+    elevation: 4,
   },
-  bubbleArrow: {
-    position: 'absolute',
-    right: -7,
-    top: '50%',
-    marginTop: -6,
-    width: 0,
-    height: 0,
-    borderTopWidth: 6,
-    borderBottomWidth: 6,
-    borderLeftWidth: 7,
-    borderTopColor: 'transparent',
-    borderBottomColor: 'transparent',
-  },
-  thumbnailPreviewWrap: {
-    width: '100%',
-    height: 52,
-    borderRadius: 6,
-    overflow: 'hidden',
-    marginBottom: 6,
-    backgroundColor: 'rgba(0,0,0,0.3)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.15)',
-    position: 'relative',
-  },
-  thumbnailImage: {
-    width: '100%',
-    height: '100%',
-  },
-  thumbPageBadge: {
-    position: 'absolute',
-    bottom: 3,
-    right: 4,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    paddingHorizontal: 4,
-    paddingVertical: 1,
-    borderRadius: 4,
-  },
-  thumbPageBadgeText: {
-    color: '#ffffff',
-    fontSize: 8,
+  pageNumberText: {
+    fontSize: 20,
     fontWeight: '700',
-  },
-  bubbleHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 2,
-    gap: 8,
-  },
-  bubbleLabelGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  bubblePageLabel: {
-    fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: 1.2,
-  },
-  pctBadge: {
-    paddingHorizontal: 5,
-    paddingVertical: 1.5,
-    borderRadius: 5,
-  },
-  pctBadgeText: {
-    fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: 0.3,
-  },
-  bubbleNumbersRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-  },
-  bubblePageNumber: {
-    fontSize: 21,
-    fontWeight: '800',
     fontVariant: ['tabular-nums'],
     letterSpacing: -0.5,
   },
-  bubbleTotalNumber: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  scrubbingIndicatorRow: {
-    flexDirection: 'row',
+  /* Red circular drag handle with two horizontal white grip bars */
+  redCircleHandle: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    width: CIRCLE_SIZE,
+    height: CIRCLE_SIZE,
+    borderRadius: CIRCLE_SIZE / 2,
+    backgroundColor: '#dc2626', // Acrobat Crimson Red
+    justifyContent: 'center',
     alignItems: 'center',
-    gap: 3,
-    marginTop: 2,
+    shadowColor: '#000000',
+    shadowOffset: { width: -1, height: 3 },
+    shadowOpacity: 0.35,
+    shadowRadius: 5,
+    elevation: 8,
   },
-  scrubHint: {
-    fontSize: 8.5,
-    fontWeight: '600',
-    letterSpacing: 0.2,
-    textTransform: 'uppercase',
+  gripBarsContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4.5,
+  },
+  gripBar: {
+    width: 20,
+    height: 3.5,
+    backgroundColor: '#ffffff',
+    borderRadius: 2,
   },
 });

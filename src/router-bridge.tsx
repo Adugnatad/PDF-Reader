@@ -67,14 +67,26 @@ function parseUrl(url: string): RouterLocation {
   return { pathname: pathname || '/', params };
 }
 
-export function ExpoRouterProvider({ children }: { children?: React.ReactNode }) {
-  const [history, setHistory] = useState<RouterLocation[]>(() => {
-    if (typeof window !== 'undefined' && window.location.hash) {
-      const hash = window.location.hash.replace(/^#/, '');
-      return [parseUrl(hash || '/')];
+function getInitialLocation(): RouterLocation {
+  if (typeof window === 'undefined') {
+    return { pathname: '/', params: {} };
+  }
+  if (window.location.hash) {
+    const hash = window.location.hash.replace(/^#/, '');
+    if (hash) {
+      return parseUrl(hash);
     }
-    return [{ pathname: '/', params: {} }];
-  });
+  }
+  const search = window.location.search;
+  const path = window.location.pathname;
+  if (search || (path && path !== '/')) {
+    return parseUrl(`${path}${search}`);
+  }
+  return { pathname: '/', params: {} };
+}
+
+export function ExpoRouterProvider({ children }: { children?: React.ReactNode }) {
+  const [history, setHistory] = useState<RouterLocation[]>(() => [getInitialLocation()]);
 
   const currentLocation = history[history.length - 1] || { pathname: '/', params: {} };
 
@@ -153,7 +165,8 @@ export function ExpoRouterProvider({ children }: { children?: React.ReactNode })
 
 // Slot component renders the active route component inside a layout
 export function Slot() {
-  const { pathname } = usePathname() ? { pathname: usePathname() } : { pathname: '/' };
+  const { location } = useContext(RouterContext);
+  const pathname = location.pathname || '/';
 
   // Match / -> /app/index.tsx
   // Match /pdf -> /app/pdf.tsx
@@ -181,7 +194,7 @@ export function Slot() {
     return null;
   }
 
-  return <Component />;
+  return <Component key={`${pathname}-${JSON.stringify(location.params)}`} />;
 }
 
 export function Stack({ children }: { children?: React.ReactNode }) {

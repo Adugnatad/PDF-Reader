@@ -401,54 +401,64 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
   // Continuous page canvas refs
   const continuousCanvases = useRef<Map<number, any>>(new Map());
 
+  // Synchronize internal active document state when docId or docTitle props change
+  useEffect(() => {
+    const nextId = docId || docTitle;
+    const nextTitle = docTitle || nextId;
+    if (nextId && (nextId !== activeId || nextTitle !== activeTitle)) {
+      setActiveId(nextId);
+      setActiveTitle(nextTitle);
+      const cached =
+        pdfStore.getCachedPdf(nextId) || pdfStore.getCachedPdf(nextTitle);
+      if (cached && cached.data && cached.data.byteLength > 0) {
+        setPdfBytes(cached.data);
+        setNumPages(cached.pageCount || 0);
+        setIsLoading(false);
+      } else {
+        setPdfBytes(null);
+        setIsLoading(true);
+      }
+      setCurrentPage(1);
+    }
+  }, [docId, docTitle]);
+
   // 1. Fetch PDF Data from store with zero-delay disk streaming
   useEffect(() => {
     let isCancelled = false;
-    if (!pdfBytes && !nativePdfUri) {
-      setIsLoading(true);
-    }
+    setIsLoading(true);
     setLoadError(null);
 
     async function loadPdf() {
       try {
-        let currentItem = initialCached;
-        let currentBytes = pdfBytes;
-        let currentUri: string | undefined = nativePdfUri;
+        const targetId = activeId || docId || docTitle;
+        if (!targetId) return;
 
-        // On native mobile: Stream directly from disk without reading into JS memory
-        if (Platform.OS !== "web") {
-          if (!currentUri) {
-            currentUri =
-              pdfStore.getNativeUri(activeId) ||
-              pdfStore.getNativeUri(docTitle);
-          }
-          if (currentUri) {
-            setNativePdfUri(currentUri);
+        // Fetch fresh document bytes directly from pdfStore for targetId
+        const item = await pdfStore.getPdfData(targetId);
+        if (isCancelled) return;
+
+        if (!item || !item.data || item.data.byteLength === 0) {
+          if (Platform.OS !== "web" && item?.nativeUri) {
+            setNativePdfUri(item.nativeUri);
             setIsLoading(false);
             return;
           }
+          throw new Error(`Could not load document content for ${activeTitle || targetId}`);
         }
 
-        if (!currentBytes || !currentItem) {
-          const item = await pdfStore.getPdfData(activeId);
-          if (isCancelled) return;
-          currentItem = item as any;
-          currentBytes = item.data;
-          setPdfBytes(item.data);
-          setActiveTitle(item.name);
-          currentUri = item.nativeUri || currentUri;
+        const currentBytes = item.data;
+        setPdfBytes(currentBytes);
+        setActiveTitle(item.name || activeTitle);
+        if (item.nativeUri) {
+          setNativePdfUri(item.nativeUri);
         }
 
         if (Platform.OS !== "web") {
-          if (currentUri) {
-            setNativePdfUri(currentUri);
-            setIsLoading(false);
-            return;
-          }
-          if (!currentUri && currentBytes && currentBytes.byteLength > 0) {
+          let currentUri = item.nativeUri;
+          if (!currentUri && currentBytes.byteLength > 0) {
             currentUri = await getPdfLocalUri(
               currentBytes,
-              currentItem?.name || activeTitle
+              item.name || activeTitle
             );
             if (isCancelled) return;
             setNativePdfUri(currentUri);
@@ -472,8 +482,8 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
           if (isCancelled) return;
           setPdfDoc(loadedDoc);
           setNumPages(loadedDoc.numPages);
-          if (docId && loadedDoc.numPages > 0) {
-            pdfStore.updatePageCount(docId, loadedDoc.numPages);
+          if (targetId && loadedDoc.numPages > 0) {
+            pdfStore.updatePageCount(targetId, loadedDoc.numPages);
           }
           setCurrentPage(1);
           setIsLoading(false);
@@ -497,7 +507,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
         currentRenderTask.current.cancel();
       }
     };
-  }, [activeId]);
+  }, [activeId, activeTitle]);
 
   // 2. Generate Thumbnails in background for sidebar scrubber & thumbnail strip
   useEffect(() => {
@@ -970,7 +980,11 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
       );
       setActiveId(newDoc.id);
       setActiveTitle(newDoc.name);
+      setPdfBytes(picked.buffer);
+      setNumPages(newDoc.pageCount || 1);
+      setCurrentPage(1);
       setLoadError(null);
+      setIsLoading(false);
       onShowToast(`Opened ${picked.name}`);
     } catch (err: any) {
       onShowToast("Error loading PDF: " + (err?.message || "Failed"));

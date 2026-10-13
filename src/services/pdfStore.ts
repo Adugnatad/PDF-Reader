@@ -22,6 +22,11 @@ import {
   isJunkDocument,
 } from '../utils/pdfNameResolver';
 import { saveRegistryToDisk, loadRegistryFromDisk } from './storageHelper';
+import {
+  savePdfToIndexedDb,
+  getPdfFromIndexedDb,
+  deletePdfFromIndexedDb,
+} from './pdfStorageDb';
 
 interface StoredPdf {
   id: string;
@@ -525,7 +530,30 @@ class PdfStoreService {
       }
     }
 
-    // 3. Check if we have a native URI for this file on device
+    // 3. Check IndexedDB persistent browser database
+    try {
+      const fromDb = await getPdfFromIndexedDb(docIdOrTitle);
+      if (fromDb && fromDb.data && fromDb.data.byteLength > 0) {
+        const stored: StoredPdf = {
+          id: fromDb.id,
+          name: fromDb.name,
+          data: cloneBufferSafe(fromDb.data),
+          uploadedAt: 'Device Storage',
+        };
+        this.pdfCache.set(docIdOrTitle, stored);
+        this.pdfCache.set(fromDb.id, stored);
+        this.pdfCache.set(fromDb.name, stored);
+        return {
+          data: cloneBufferSafe(stored.data),
+          name: stored.name,
+          id: stored.id,
+        };
+      }
+    } catch (e) {
+      console.warn('IndexedDB read error:', e);
+    }
+
+    // 4. Check if we have a native URI for this file on device
     const nativeUri =
       this.nativeUriMap.get(docIdOrTitle) ||
       this.nativeUriMap.get(docIdOrTitle.toLowerCase());
@@ -553,6 +581,7 @@ class PdfStoreService {
         };
         this.pdfCache.set(docIdOrTitle, stored);
         this.pdfCache.set(storedName, stored);
+        savePdfToIndexedDb(docIdOrTitle, storedName, stored.data).catch(() => {});
         return {
           data: cloneBufferSafe(stored.data),
           name: stored.name,
@@ -570,30 +599,48 @@ class PdfStoreService {
       };
     }
 
-    // 4. Match known generators or generate authentic dynamic PDF
-    const lower = docIdOrTitle.toLowerCase();
-    let generatedBytes: Uint8Array;
-    let finalTitle = docIdOrTitle;
+    // 5. Check userFiles metadata to resolve the real target title
+    const userFile = this.userFiles.find(
+      (f) =>
+        f.id === docIdOrTitle ||
+        f.name.toLowerCase() === docIdOrTitle.toLowerCase() ||
+        f.name.toLowerCase().replace(/\.pdf$/i, '') === docIdOrTitle.toLowerCase().replace(/\.pdf$/i, '')
+    );
 
-    if (
-      lower.includes('tax') ||
-      lower.includes('1040') ||
-      lower.includes('schedule c')
-    ) {
+    const targetName = (userFile ? userFile.name : docIdOrTitle).trim();
+    const cleanLower = targetName.toLowerCase();
+    let generatedBytes: Uint8Array;
+    let finalTitle = targetName;
+
+    // 6. Match known sample templates ONLY for explicit sample IDs/names
+    const isSampleTax =
+      docIdOrTitle === 'sample-tax' ||
+      cleanLower === 'q4_tax_filing_signed.pdf' ||
+      cleanLower === 'q4_tax_filing_signed';
+    const isSampleContract =
+      docIdOrTitle === 'sample-contract' ||
+      cleanLower === 'contract_vendor_agreement.pdf' ||
+      cleanLower === 'contract_vendor_agreement';
+    const isSampleAudit =
+      docIdOrTitle === 'sample-audit' ||
+      cleanLower === 'executive_audit_report_2026.pdf' ||
+      cleanLower === 'executive_audit_report_2026';
+
+    if (isSampleTax) {
       generatedBytes = await generateTaxFilingPdf();
       finalTitle = 'Q4_Tax_Filing_Signed.pdf';
-    } else if (lower.includes('contract') || lower.includes('vendor')) {
+    } else if (isSampleContract) {
       generatedBytes = await generateContractPdf();
       finalTitle = 'Contract_Vendor_Agreement.pdf';
-    } else if (lower.includes('audit') || lower.includes('executive')) {
+    } else if (isSampleAudit) {
       generatedBytes = await generateExecutiveAuditPdf();
       finalTitle = 'Executive_Audit_Report_2026.pdf';
     } else {
-      // Dynamic authentic multi-page PDF generation for device storage items
+      // Generate authentic document content for this specific document title
       generatedBytes = await generateDynamicDevicePdf(
-        docIdOrTitle,
+        targetName,
         'Documents',
-        6
+        userFile?.pageCount || 6
       );
       if (!finalTitle.toLowerCase().endsWith('.pdf')) {
         finalTitle = `${finalTitle}.pdf`;
@@ -608,6 +655,9 @@ class PdfStoreService {
       nativeUri,
     };
     this.pdfCache.set(docIdOrTitle, stored);
+    this.pdfCache.set(finalTitle, stored);
+    savePdfToIndexedDb(docIdOrTitle, finalTitle, stored.data).catch(() => {});
+
     return {
       data: cloneBufferSafe(stored.data),
       name: stored.name,
@@ -662,6 +712,8 @@ class PdfStoreService {
 
     this.pdfCache.set(id, stored);
     this.pdfCache.set(resolvedName, stored);
+    savePdfToIndexedDb(id, resolvedName, safeBuffer).catch(() => {});
+    savePdfToIndexedDb(resolvedName, resolvedName, safeBuffer).catch(() => {});
     if (nativeUri) {
       this.nativeUriMap.set(id, nativeUri);
       this.nativeUriMap.set(resolvedName, nativeUri);
@@ -787,6 +839,11 @@ class PdfStoreService {
   }
 
   public recordFileOpened(idOrName: string): void {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        window.localStorage.setItem('docuflow_last_opened_id', idOrName);
+      } catch {}
+    }
     let found = false;
     const now = Date.now();
     this.userFiles = this.userFiles.map((f) => {
@@ -800,6 +857,26 @@ class PdfStoreService {
       this.saveToStorage();
       this.notify();
     }
+  }
+
+  public getLastOpenedDoc(): DocFile | null {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        const lastId = window.localStorage.getItem('docuflow_last_opened_id');
+        if (lastId) {
+          const found = this.userFiles.find(
+            (f) => f.id === lastId || f.name.toLowerCase() === lastId.toLowerCase()
+          );
+          if (found) return found;
+        }
+      } catch {}
+    }
+    const withOpened = this.userFiles.filter((f) => !!f.lastOpenedAt);
+    if (withOpened.length > 0) {
+      withOpened.sort((a, b) => (b.lastOpenedAt || 0) - (a.lastOpenedAt || 0));
+      return withOpened[0];
+    }
+    return this.userFiles[0] || null;
   }
 
   /**
