@@ -70,9 +70,19 @@ interface StampAnnotation {
   time: string;
 }
 
+interface SearchHighlightBox {
+  id: string;
+  page: number;
+  left: number; // percentage 0-100
+  top: number; // percentage 0-100
+  width: number; // percentage 0-100
+  height: number; // percentage 0-100
+}
+
 interface SearchMatch {
   page: number;
   snippet: string;
+  box: SearchHighlightBox;
 }
 
 export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
@@ -898,7 +908,11 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
 
   // 8. Search Functionality
   const handleExecuteSearch = async () => {
-    if (!pdfDoc || !searchQuery.trim()) return;
+    if (!pdfDoc || !searchQuery.trim()) {
+      setSearchResults([]);
+      setSearchIndex(0);
+      return;
+    }
 
     setIsSearching(true);
     const q = searchQuery.toLowerCase().trim();
@@ -907,14 +921,133 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
     try {
       for (let p = 1; p <= numPages; p++) {
         const page = await pdfDoc.getPage(p);
+        const viewport = page.getViewport({ scale: 1.0, rotation });
         const content = await page.getTextContent();
-        const text = content.items.map((i: any) => i.str || "").join(" ");
-        if (text.toLowerCase().includes(q)) {
-          const idx = text.toLowerCase().indexOf(q);
-          const start = Math.max(0, idx - 25);
-          const end = Math.min(text.length, idx + q.length + 35);
-          const snippet = `...${text.substring(start, end).trim()}...`;
-          matches.push({ page: p, snippet });
+        let matchesOnThisPage = 0;
+
+        for (let itemIdx = 0; itemIdx < content.items.length; itemIdx++) {
+          const item: any = content.items[itemIdx];
+          if (!item || typeof item.str !== "string" || !item.str.trim()) continue;
+
+          const itemStr = item.str;
+          const itemLower = itemStr.toLowerCase();
+          let fromIdx = 0;
+
+          while (fromIdx < itemLower.length) {
+            const foundIdx = itemLower.indexOf(q, fromIdx);
+            if (foundIdx === -1) break;
+
+            let left = 0;
+            let top = 0;
+            let width = 0;
+            let height = 0;
+
+            if (
+              item.transform &&
+              Array.isArray(item.transform) &&
+              item.transform.length >= 6
+            ) {
+              const tx = item.transform[4];
+              const ty = item.transform[5];
+              const itemW = item.width || Math.max(12, itemStr.length * 7);
+              const itemH =
+                item.height ||
+                Math.abs(item.transform[3]) ||
+                Math.abs(item.transform[0]) ||
+                12;
+
+              if (typeof viewport.convertToViewportRectangle === "function") {
+                const rect = viewport.convertToViewportRectangle([
+                  tx,
+                  ty,
+                  tx + itemW,
+                  ty + itemH,
+                ]);
+                const minX = Math.min(rect[0], rect[2]);
+                const minY = Math.min(rect[1], rect[3]);
+                const maxX = Math.max(rect[0], rect[2]);
+                const maxY = Math.max(rect[1], rect[3]);
+                const boxW = Math.max(1, maxX - minX);
+                const boxH = Math.max(1, maxY - minY);
+
+                const totalChars = Math.max(1, itemStr.length);
+                const charStartRatio = foundIdx / totalChars;
+                const charLenRatio = Math.min(1, q.length / totalChars);
+
+                left =
+                  ((minX + boxW * charStartRatio) / viewport.width) * 100;
+                top = (minY / viewport.height) * 100;
+                width = ((boxW * charLenRatio) / viewport.width) * 100;
+                height = (boxH / viewport.height) * 100;
+              } else {
+                const minX = tx;
+                const minY = viewport.height - ty - itemH;
+                const totalChars = Math.max(1, itemStr.length);
+                left =
+                  ((minX + itemW * (foundIdx / totalChars)) /
+                    viewport.width) *
+                  100;
+                top = (minY / viewport.height) * 100;
+                width = ((itemW * (q.length / totalChars)) / viewport.width) * 100;
+                height = (itemH / viewport.height) * 100;
+              }
+            }
+
+            left = Math.max(0, Math.min(98, left));
+            top = Math.max(0, Math.min(98, top));
+            width = Math.max(1.8, Math.min(100 - left, width));
+            height = Math.max(1.5, Math.min(100 - top, height));
+
+            const snippetStart = Math.max(0, foundIdx - 20);
+            const snippetEnd = Math.min(itemStr.length, foundIdx + q.length + 30);
+            const snippet = `...${itemStr.substring(snippetStart, snippetEnd).trim()}...`;
+
+            matches.push({
+              page: p,
+              snippet,
+              box: {
+                id: `p${p}-m${matches.length}-${foundIdx}`,
+                page: p,
+                left,
+                top,
+                width,
+                height,
+              },
+            });
+
+            matchesOnThisPage++;
+            fromIdx = foundIdx + Math.max(1, q.length);
+          }
+        }
+
+        // Check full page joined text as fallback if broken across items
+        if (matchesOnThisPage === 0) {
+          const fullPageText = content.items
+            .map((i: any) => i.str || "")
+            .join(" ");
+          const fullLower = fullPageText.toLowerCase();
+          const matchIdx = fullLower.indexOf(q);
+          if (matchIdx !== -1) {
+            const start = Math.max(0, matchIdx - 25);
+            const end = Math.min(fullPageText.length, matchIdx + q.length + 35);
+            const snippet = `...${fullPageText.substring(start, end).trim()}...`;
+            const lineProgress = Math.max(
+              0.1,
+              Math.min(0.9, matchIdx / Math.max(1, fullPageText.length)),
+            );
+            matches.push({
+              page: p,
+              snippet,
+              box: {
+                id: `p${p}-m${matches.length}-approx`,
+                page: p,
+                left: 10,
+                top: lineProgress * 85,
+                width: 80,
+                height: 3.5,
+              },
+            });
+          }
         }
       }
 
@@ -931,6 +1064,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
         onShowToast(`No matches found for "${searchQuery}"`);
       }
     } catch (err) {
+      console.warn("Search error:", err);
       setIsSearching(false);
       onShowToast("Search error occurred");
     }
@@ -956,6 +1090,22 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
       `Match ${prevIdx + 1} of ${searchResults.length} (Page ${searchResults[prevIdx].page})`,
     );
   };
+
+  // Real-time debounced auto-search while typing in search bar
+  useEffect(() => {
+    if (!searchOpen || !pdfDoc) return;
+    if (!searchQuery.trim()) {
+      setSearchResults([]);
+      setSearchIndex(0);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      void handleExecuteSearch();
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery, searchOpen, pdfDoc, numPages, rotation]);
 
   // 9. Open Another PDF from Native Device Storage or Web
   const handlePickAnotherPdf = async () => {
@@ -1137,6 +1287,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
   };
 
   const t = getThemeColors();
+  const isLight = theme === "light";
 
   return (
     <View style={[styles.container, { backgroundColor: t.bg }]}>
@@ -1261,21 +1412,70 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                 </View>
 
                 <View style={styles.reflowParagraphsContainer}>
-                  {reflowParagraphs.map((para, idx) => (
-                    <Text
-                      key={idx}
-                      style={[
-                        styles.reflowParagraph,
-                        {
-                          color: t.text,
-                          fontSize: reflowFontSize,
-                          lineHeight: Math.round(reflowFontSize * 1.68),
-                        },
-                      ]}
-                    >
-                      {para}
-                    </Text>
-                  ))}
+                  {reflowParagraphs.map((para, idx) => {
+                    const q = searchQuery.toLowerCase().trim();
+                    if (!searchOpen || !q || !para.toLowerCase().includes(q)) {
+                      return (
+                        <Text
+                          key={idx}
+                          style={[
+                            styles.reflowParagraph,
+                            {
+                              color: t.text,
+                              fontSize: reflowFontSize,
+                              lineHeight: Math.round(reflowFontSize * 1.68),
+                            },
+                          ]}
+                        >
+                          {para}
+                        </Text>
+                      );
+                    }
+
+                    const parts: React.ReactNode[] = [];
+                    let lastIdx = 0;
+                    const pLower = para.toLowerCase();
+                    let matchIdx = pLower.indexOf(q, lastIdx);
+
+                    while (matchIdx !== -1) {
+                      if (matchIdx > lastIdx) {
+                        parts.push(para.substring(lastIdx, matchIdx));
+                      }
+                      const matchedText = para.substring(
+                        matchIdx,
+                        matchIdx + q.length,
+                      );
+                      parts.push(
+                        <Text
+                          key={`hl-${idx}-${matchIdx}`}
+                          style={styles.reflowSearchHighlight}
+                        >
+                          {matchedText}
+                        </Text>,
+                      );
+                      lastIdx = matchIdx + q.length;
+                      matchIdx = pLower.indexOf(q, lastIdx);
+                    }
+                    if (lastIdx < para.length) {
+                      parts.push(para.substring(lastIdx));
+                    }
+
+                    return (
+                      <Text
+                        key={idx}
+                        style={[
+                          styles.reflowParagraph,
+                          {
+                            color: t.text,
+                            fontSize: reflowFontSize,
+                            lineHeight: Math.round(reflowFontSize * 1.68),
+                          },
+                        ]}
+                      >
+                        {parts}
+                      </Text>
+                    );
+                  })}
                 </View>
               </View>
             )}
@@ -1402,6 +1602,39 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                           }}
                         />
                       )}
+
+                      {/* Search Results Highlights in File */}
+                      {searchOpen &&
+                        searchQuery.trim().length > 0 &&
+                        searchResults
+                          .filter((m) => m.page === currentPage)
+                          .map((m, idx) => {
+                            const isCurrent =
+                              searchResults[searchIndex] &&
+                              searchResults[searchIndex].box.id === m.box.id;
+                            return (
+                              <View
+                                key={m.box.id || `hl-${idx}`}
+                                style={[
+                                  styles.searchHighlightBox,
+                                  {
+                                    top: `${m.box.top}%` as any,
+                                    left: `${m.box.left}%` as any,
+                                    width: `${m.box.width}%` as any,
+                                    height: `${m.box.height}%` as any,
+                                    backgroundColor: isCurrent
+                                      ? "rgba(255, 140, 0, 0.48)"
+                                      : "rgba(255, 235, 59, 0.45)",
+                                    borderColor: isCurrent
+                                      ? "#ea580c"
+                                      : "rgba(234, 179, 8, 0.75)",
+                                    borderWidth: isCurrent ? 2 : 1,
+                                  },
+                                ]}
+                                pointerEvents="none"
+                              />
+                            );
+                          })}
 
                       {/* Notes and Stamps Overlays */}
                       {notes
@@ -1543,16 +1776,57 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                           style={{
                             filter: t.canvasFilter as any,
                             alignItems: "center",
+                            position: "relative",
                           }}
                         >
                           {Platform.OS === "web" ? (
-                            <canvas
-                              ref={(el) => {
-                                if (el) continuousCanvases.current.set(p, el);
-                                else continuousCanvases.current.delete(p);
+                            <View
+                              style={{
+                                position: "relative",
+                                maxWidth: "100%",
                               }}
-                              style={{ display: "block", maxWidth: "100%" }}
-                            />
+                            >
+                              <canvas
+                                ref={(el) => {
+                                  if (el) continuousCanvases.current.set(p, el);
+                                  else continuousCanvases.current.delete(p);
+                                }}
+                                style={{ display: "block", maxWidth: "100%" }}
+                              />
+                              {/* Search Results Highlights in Continuous Page */}
+                              {searchOpen &&
+                                searchQuery.trim().length > 0 &&
+                                searchResults
+                                  .filter((m) => m.page === p)
+                                  .map((m, idx) => {
+                                    const isCurrent =
+                                      searchResults[searchIndex] &&
+                                      searchResults[searchIndex].box.id ===
+                                        m.box.id;
+                                    return (
+                                      <View
+                                        key={m.box.id || `hl-horiz-${idx}`}
+                                        style={[
+                                          styles.searchHighlightBox,
+                                          {
+                                            top: `${m.box.top}%` as any,
+                                            left: `${m.box.left}%` as any,
+                                            width: `${m.box.width}%` as any,
+                                            height: `${m.box.height}%` as any,
+                                            backgroundColor: isCurrent
+                                              ? "rgba(255, 140, 0, 0.48)"
+                                              : "rgba(255, 235, 59, 0.45)",
+                                            borderColor: isCurrent
+                                              ? "#ea580c"
+                                              : "rgba(234, 179, 8, 0.75)",
+                                            borderWidth: isCurrent ? 2 : 1,
+                                          },
+                                        ]}
+                                        pointerEvents="none"
+                                      />
+                                    );
+                                  })}
+                            </View>
                           ) : (
                             <View style={styles.nativePdfFallbackCard}>
                               <Ionicons
@@ -1606,16 +1880,57 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                           style={{
                             filter: t.canvasFilter as any,
                             alignItems: "center",
+                            position: "relative",
                           }}
                         >
                           {Platform.OS === "web" ? (
-                            <canvas
-                              ref={(el) => {
-                                if (el) continuousCanvases.current.set(p, el);
-                                else continuousCanvases.current.delete(p);
+                            <View
+                              style={{
+                                position: "relative",
+                                maxWidth: "100%",
                               }}
-                              style={{ display: "block", maxWidth: "100%" }}
-                            />
+                            >
+                              <canvas
+                                ref={(el) => {
+                                  if (el) continuousCanvases.current.set(p, el);
+                                  else continuousCanvases.current.delete(p);
+                                }}
+                                style={{ display: "block", maxWidth: "100%" }}
+                              />
+                              {/* Search Results Highlights in Continuous Page */}
+                              {searchOpen &&
+                                searchQuery.trim().length > 0 &&
+                                searchResults
+                                  .filter((m) => m.page === p)
+                                  .map((m, idx) => {
+                                    const isCurrent =
+                                      searchResults[searchIndex] &&
+                                      searchResults[searchIndex].box.id ===
+                                        m.box.id;
+                                    return (
+                                      <View
+                                        key={m.box.id || `hl-cont-${idx}`}
+                                        style={[
+                                          styles.searchHighlightBox,
+                                          {
+                                            top: `${m.box.top}%` as any,
+                                            left: `${m.box.left}%` as any,
+                                            width: `${m.box.width}%` as any,
+                                            height: `${m.box.height}%` as any,
+                                            backgroundColor: isCurrent
+                                              ? "rgba(255, 140, 0, 0.48)"
+                                              : "rgba(255, 235, 59, 0.45)",
+                                            borderColor: isCurrent
+                                              ? "#ea580c"
+                                              : "rgba(234, 179, 8, 0.75)",
+                                            borderWidth: isCurrent ? 2 : 1,
+                                          },
+                                        ]}
+                                        pointerEvents="none"
+                                      />
+                                    );
+                                  })}
+                            </View>
                           ) : (
                             <View style={styles.nativePdfFallbackCard}>
                               <Ionicons
@@ -1778,18 +2093,31 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
 
         {/* Top Search Bar Drawer (Find in Document) */}
         {searchOpen && (
-          <View style={styles.topSearchDrawer}>
-            <View style={styles.searchInnerRow}>
+          <View
+            style={[
+              styles.topSearchDrawer,
+              isLight && styles.topSearchDrawerLight,
+            ]}
+          >
+            <View
+              style={[
+                styles.searchInnerRow,
+                isLight && styles.searchInnerRowLight,
+              ]}
+            >
               <Ionicons
                 name="search"
                 size={17}
-                color="#7bd0ff"
+                color={isLight ? "#2563eb" : "#7bd0ff"}
                 style={{ marginRight: 6 }}
               />
               <TextInput
-                style={styles.searchDrawerInputField}
+                style={[
+                  styles.searchDrawerInputField,
+                  isLight && styles.searchDrawerInputFieldLight,
+                ]}
                 placeholder="Find in document..."
-                placeholderTextColor="#908fa0"
+                placeholderTextColor={isLight ? "#64748b" : "#908fa0"}
                 value={searchQuery}
                 onChangeText={setSearchQuery}
                 onSubmitEditing={handleExecuteSearch}
@@ -1799,13 +2127,23 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
               {isSearching && (
                 <ActivityIndicator
                   size="small"
-                  color="#7bd0ff"
+                  color={isLight ? "#2563eb" : "#7bd0ff"}
                   style={{ marginHorizontal: 6 }}
                 />
               )}
               {searchResults.length > 0 && (
-                <View style={styles.searchMatchCounter}>
-                  <Text style={styles.searchMatchText}>
+                <View
+                  style={[
+                    styles.searchMatchCounter,
+                    isLight && styles.searchMatchCounterLight,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.searchMatchText,
+                      isLight && styles.searchMatchTextLight,
+                    ]}
+                  >
                     {searchIndex + 1}/{searchResults.length}
                   </Text>
                   <TouchableOpacity
@@ -1813,24 +2151,42 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                     style={styles.searchChevronBtn}
                     accessibilityLabel="Previous match"
                   >
-                    <Ionicons name="chevron-up" size={16} color="#dae2fd" />
+                    <Ionicons
+                      name="chevron-up"
+                      size={16}
+                      color={isLight ? "#0f172a" : "#dae2fd"}
+                    />
                   </TouchableOpacity>
                   <TouchableOpacity
                     onPress={handleNextSearchMatch}
                     style={styles.searchChevronBtn}
                     accessibilityLabel="Next match"
                   >
-                    <Ionicons name="chevron-down" size={16} color="#dae2fd" />
+                    <Ionicons
+                      name="chevron-down"
+                      size={16}
+                      color={isLight ? "#0f172a" : "#dae2fd"}
+                    />
                   </TouchableOpacity>
                 </View>
               )}
               {searchQuery.trim().length > 0 && (
                 <TouchableOpacity
                   onPress={handleExecuteSearch}
-                  style={styles.searchExecuteBtn}
+                  style={[
+                    styles.searchExecuteBtn,
+                    isLight && styles.searchExecuteBtnLight,
+                  ]}
                   activeOpacity={0.8}
                 >
-                  <Text style={styles.searchExecuteBtnText}>Find</Text>
+                  <Text
+                    style={[
+                      styles.searchExecuteBtnText,
+                      isLight && styles.searchExecuteBtnTextLight,
+                    ]}
+                  >
+                    Find
+                  </Text>
                 </TouchableOpacity>
               )}
               <TouchableOpacity
@@ -1842,7 +2198,11 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                 style={styles.searchDrawerCloseBtn}
                 accessibilityLabel="Close search"
               >
-                <Ionicons name="close" size={18} color="#908fa0" />
+                <Ionicons
+                  name="close"
+                  size={18}
+                  color={isLight ? "#64748b" : "#908fa0"}
+                />
               </TouchableOpacity>
             </View>
           </View>
@@ -3163,5 +3523,39 @@ const styles = StyleSheet.create({
   thumbCardLabelActive: {
     color: "#7bd0ff",
     fontWeight: "700",
+  },
+  searchHighlightBox: {
+    position: "absolute",
+    borderRadius: 2,
+    zIndex: 75,
+  },
+  reflowSearchHighlight: {
+    backgroundColor: "rgba(255, 235, 59, 0.7)",
+    color: "#854d0e",
+    fontWeight: "700",
+    borderRadius: 2,
+  },
+  topSearchDrawerLight: {
+    backgroundColor: "#ffffff",
+    borderBottomColor: "#e2e8f0",
+  },
+  searchInnerRowLight: {
+    backgroundColor: "#f8fafc",
+    borderColor: "#cbd5e1",
+  },
+  searchDrawerInputFieldLight: {
+    color: "#0f172a",
+  },
+  searchMatchCounterLight: {
+    backgroundColor: "#e2e8f0",
+  },
+  searchMatchTextLight: {
+    color: "#2563eb",
+  },
+  searchExecuteBtnLight: {
+    backgroundColor: "#2563eb",
+  },
+  searchExecuteBtnTextLight: {
+    color: "#ffffff",
   },
 });

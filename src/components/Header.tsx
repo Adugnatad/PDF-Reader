@@ -116,7 +116,40 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Right Section: Top Options Toolbar */}
         <View style={styles.rightGroup}>
-          {/* 1. Button for rotating the screen horizontal */}
+          {/* 1. Button for searching in PDF document */}
+          {onToggleSearch && (
+            <TouchableOpacity
+              accessibilityLabel={
+                searchOpen ? "Close search" : "Search in document"
+              }
+              onPress={onToggleSearch}
+              style={[
+                styles.iconButton,
+                isLight && styles.iconButtonLight,
+                searchOpen &&
+                  (isLight
+                    ? styles.iconButtonLightActive
+                    : styles.iconButtonActive),
+              ]}
+              activeOpacity={0.7}
+            >
+              <Ionicons
+                name={searchOpen ? "search" : "search-outline"}
+                size={20}
+                color={
+                  searchOpen
+                    ? isLight
+                      ? "#2563eb"
+                      : "#7bd0ff"
+                    : isLight
+                      ? "#000"
+                      : "#c7c4d7"
+                }
+              />
+            </TouchableOpacity>
+          )}
+
+          {/* 2. Button for rotating the screen horizontal */}
           {onRotateHorizontal && (
             <TouchableOpacity
               accessibilityLabel={
@@ -471,8 +504,18 @@ const styles = StyleSheet.create({
     // borderColor: "rgba(45, 52, 73, 0.5)",
   },
   iconButtonLight: {},
-  iconButtonActive: {},
-  iconButtonDarkActive: {},
+  iconButtonActive: {
+    backgroundColor: "rgba(123, 208, 255, 0.16)",
+    borderRadius: 8,
+  },
+  iconButtonLightActive: {
+    backgroundColor: "rgba(37, 99, 235, 0.12)",
+    borderRadius: 8,
+  },
+  iconButtonDarkActive: {
+    backgroundColor: "rgba(218, 226, 253, 0.16)",
+    borderRadius: 8,
+  },
   titleText: {
     fontSize: 15,
     fontWeight: "600",
