@@ -28,7 +28,7 @@ import { ReaderTheme } from "../types";
 import { pdfStore } from "../services/pdfStore";
 import { pdfjsLib } from "../services/pdfService";
 import { ViewModeModal } from "./ViewModeModal";
-import { pickPdfFromDevice, readNativePdfBytes } from "../services/nativeFilePicker";
+import { pickPdfFromDevice } from "../services/nativeFilePicker";
 import Pdf from "react-native-pdf";
 import { fastUint8ToBase64 } from "../utils/fastBase64";
 import {
@@ -70,19 +70,9 @@ interface StampAnnotation {
   time: string;
 }
 
-interface SearchHighlightBox {
-  id: string;
-  page: number;
-  left: number; // percentage 0-100
-  top: number; // percentage 0-100
-  width: number; // percentage 0-100
-  height: number; // percentage 0-100
-}
-
 interface SearchMatch {
   page: number;
   snippet: string;
-  box: SearchHighlightBox;
 }
 
 export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
@@ -94,26 +84,26 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
   // Instantaneous Document State Initialization from Cache
   const initialActiveId = docId || docTitle;
   const initialCached =
-    pdfStore.getCachedPdf(initialActiveId) || pdfStore.getCachedPdf(docTitle);
+    pdfStore.getCachedPdf(initialActiveId) ||
+    pdfStore.getCachedPdf(docTitle);
 
   const initialNativeUri =
     initialCached?.nativeUri ||
     (initialCached?.data
-      ? getCachedLocalUri(initialCached.name, initialCached.data.byteLength) ||
-        ""
+      ? getCachedLocalUri(initialCached.name, initialCached.data.byteLength) || ""
       : "");
 
   const [activeTitle, setActiveTitle] = useState(
-    initialCached ? initialCached.name : docTitle,
+    initialCached ? initialCached.name : docTitle
   );
   const [activeId, setActiveId] = useState(initialActiveId);
   const [pdfBytes, setPdfBytes] = useState<Uint8Array | ArrayBuffer | null>(
-    initialCached ? initialCached.data : null,
+    initialCached ? initialCached.data : null
   );
   const [nativePdfUri, setNativePdfUri] = useState<string>(initialNativeUri);
   const [pdfDoc, setPdfDoc] = useState<any>(null);
   const [numPages, setNumPages] = useState<number>(
-    initialCached?.pageCount || 0,
+    initialCached?.pageCount || 0
   );
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [isLoading, setIsLoading] = useState<boolean>(!initialCached);
@@ -331,7 +321,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
         clearTimeout(debouncedScaleTimer.current);
       }
       debouncedScaleTimer.current = setTimeout(() => {
-        setZoom(+newScale.toFixed(2));
+        setZoom(+(newScale.toFixed(2)));
         triggerPageInteraction();
       }, 250);
     },
@@ -434,87 +424,61 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
           if (currentUri) {
             setNativePdfUri(currentUri);
             setIsLoading(false);
+            return;
           }
         }
 
-        if (!currentBytes || !currentItem || currentBytes.byteLength === 0) {
-          try {
-            const item = await pdfStore.getPdfData(activeId);
-            if (isCancelled) return;
-            currentItem = item as any;
-            if (item.data && item.data.byteLength > 0) {
-              currentBytes = item.data;
-              setPdfBytes(item.data);
-            }
-            setActiveTitle(item.name);
-            currentUri = item.nativeUri || currentUri;
-          } catch (e) {
-            console.warn("Could not load pdf data bytes for search indexing:", e);
-          }
-        }
-
-        // On native mobile: if currentBytes is still empty, read directly from any available URI
-        const uriToRead =
-          currentUri ||
-          nativePdfUri ||
-          pdfStore.getNativeUri(activeId) ||
-          pdfStore.getNativeUri(docTitle);
-        if ((!currentBytes || currentBytes.byteLength === 0) && uriToRead) {
-          try {
-            const buf = await readNativePdfBytes(uriToRead);
-            if (buf && buf.byteLength > 0) {
-              currentBytes = new Uint8Array(buf);
-              setPdfBytes(currentBytes);
-              if (!currentUri) currentUri = uriToRead;
-            }
-          } catch (e) {
-            console.warn("Could not read native PDF bytes for search indexing:", e);
-          }
+        if (!currentBytes || !currentItem) {
+          const item = await pdfStore.getPdfData(activeId);
+          if (isCancelled) return;
+          currentItem = item as any;
+          currentBytes = item.data;
+          setPdfBytes(item.data);
+          setActiveTitle(item.name);
+          currentUri = item.nativeUri || currentUri;
         }
 
         if (Platform.OS !== "web") {
           if (currentUri) {
             setNativePdfUri(currentUri);
-          } else if (currentBytes && currentBytes.byteLength > 0) {
+            setIsLoading(false);
+            return;
+          }
+          if (!currentUri && currentBytes && currentBytes.byteLength > 0) {
             currentUri = await getPdfLocalUri(
               currentBytes,
-              currentItem?.name || activeTitle,
+              currentItem?.name || activeTitle
             );
             if (isCancelled) return;
             setNativePdfUri(currentUri);
           }
           setIsLoading(false);
+          return;
         }
 
-        // Initialize pdfjsLib for search indexing and text highlights across BOTH Web & Native
-        if (currentBytes && currentBytes.byteLength > 0) {
-          try {
-            const bufferCopy =
-              currentBytes instanceof Uint8Array
-                ? currentBytes.slice()
-                : new Uint8Array(currentBytes).slice();
+        // On Web, initialize pdfjsLib for search, reflow, and continuous view
+        if (Platform.OS === "web" && currentBytes) {
+          const bufferCopy =
+            currentBytes instanceof Uint8Array
+              ? currentBytes.slice()
+              : new Uint8Array(currentBytes).slice();
 
-            const loadingTask = pdfjsLib.getDocument({
-              data: bufferCopy,
-            });
+          const loadingTask = pdfjsLib.getDocument({
+            data: bufferCopy,
+          });
 
-            const loadedDoc = await loadingTask.promise;
-            if (isCancelled) return;
-            setPdfDoc(loadedDoc);
-            if (loadedDoc.numPages > 0) {
-              setNumPages(loadedDoc.numPages);
-              if (docId) {
-                pdfStore.updatePageCount(docId, loadedDoc.numPages);
-              }
-            }
-            if (Platform.OS === "web") {
-              setCurrentPage(1);
-            }
-          } catch (docErr) {
-            console.warn("Could not index PDF document:", docErr);
+          const loadedDoc = await loadingTask.promise;
+          if (isCancelled) return;
+          setPdfDoc(loadedDoc);
+          setNumPages(loadedDoc.numPages);
+          if (docId && loadedDoc.numPages > 0) {
+            pdfStore.updatePageCount(docId, loadedDoc.numPages);
           }
+          setCurrentPage(1);
+          setIsLoading(false);
+        } else if (Platform.OS !== "web") {
+          setIsLoading(false);
         }
-        setIsLoading(false);
       } catch (err: any) {
         if (isCancelled) return;
         console.error("Error loading PDF:", err);
@@ -549,15 +513,8 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
           if (Platform.OS === "web" && typeof document !== "undefined") {
             const page = await pdfDoc.getPage(i);
             if (!page) continue;
-            const thumbViewport = page?.getViewport
-              ? page.getViewport({ scale: 0.22, rotation })
-              : null;
-            if (
-              !thumbViewport ||
-              typeof thumbViewport.width !== "number" ||
-              typeof thumbViewport.height !== "number"
-            )
-              continue;
+            const thumbViewport = page?.getViewport ? page.getViewport({ scale: 0.22, rotation }) : null;
+            if (!thumbViewport || typeof thumbViewport.width !== "number" || typeof thumbViewport.height !== "number") continue;
             const thumbCanvas = document.createElement("canvas");
             thumbCanvas.width = Math.floor(thumbViewport.width || 120);
             thumbCanvas.height = Math.floor(thumbViewport.height || 160);
@@ -727,15 +684,8 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
         try {
           const page = await pdfDoc.getPage(p);
           if (!page) continue;
-          const viewport = page?.getViewport
-            ? page.getViewport({ scale: zoom * 0.9, rotation })
-            : null;
-          if (
-            !viewport ||
-            typeof viewport.width !== "number" ||
-            typeof viewport.height !== "number"
-          )
-            continue;
+          const viewport = page?.getViewport ? page.getViewport({ scale: zoom * 0.9, rotation }) : null;
+          if (!viewport || typeof viewport.width !== "number" || typeof viewport.height !== "number") continue;
           const pixelRatio =
             (typeof window !== "undefined" && window.devicePixelRatio) || 1;
 
@@ -847,7 +797,9 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
       return;
     }
     onShowToast(
-      next ? "Screen rotated to landscape" : "Screen rotated to portrait",
+      next
+        ? "Screen rotated to landscape"
+        : "Screen rotated to portrait"
     );
   };
 
@@ -855,7 +807,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
     const nextTheme: ReaderTheme = theme === "night" ? "light" : "night";
     handleUpdateTheme(nextTheme);
     onShowToast(
-      nextTheme === "night" ? "Dark Mode enabled" : "Light Mode enabled",
+      nextTheme === "night" ? "Dark Mode enabled" : "Light Mode enabled"
     );
   };
 
@@ -873,7 +825,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
       const success = await printNativePdf(
         targetUri || targetBytes || new Uint8Array(),
         activeTitle,
-        isHorizontal,
+        isHorizontal
       );
 
       if (!success) {
@@ -903,18 +855,15 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
         if (item.nativeUri) targetUri = item.nativeUri;
       }
 
+      onShowToast(`Sharing "${activeTitle}"...`);
       const success = await shareNativePdf(
         targetUri || targetBytes || new Uint8Array(),
-        activeTitle,
+        activeTitle
       );
       if (success) {
         onShowToast("Document shared");
       } else {
-        if (
-          Platform.OS === "web" &&
-          typeof navigator !== "undefined" &&
-          navigator.clipboard
-        ) {
+        if (Platform.OS === "web" && typeof navigator !== "undefined" && navigator.clipboard) {
           await navigator.clipboard.writeText(window.location.href);
           onShowToast("Document link copied to clipboard");
         } else {
@@ -923,324 +872,30 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
       }
     } catch (err: any) {
       if (err?.name !== "AbortError") {
-        onShowToast(
-          Platform.OS === "web"
-            ? "Document link copied to clipboard"
-            : "Share dismissed",
-        );
+        onShowToast(Platform.OS === "web" ? "Document link copied to clipboard" : "Share dismissed");
       }
     }
   };
 
   // 8. Search Functionality
   const handleExecuteSearch = async () => {
-    let activeDoc = pdfDoc;
-    if (!activeDoc) {
-      let bytes = pdfBytes;
-      if (!bytes && activeId) {
-        try {
-          const item = await pdfStore.getPdfData(activeId);
-          if (item && item.data) {
-            bytes = item.data;
-            setPdfBytes(item.data);
-          }
-        } catch {}
-      }
-      if (!bytes || bytes.byteLength === 0) {
-        const uriToRead =
-          nativePdfUri ||
-          pdfStore.getNativeUri(activeId) ||
-          pdfStore.getNativeUri(docTitle);
-        if (uriToRead) {
-          try {
-            const buf = await readNativePdfBytes(uriToRead);
-            if (buf && buf.byteLength > 0) {
-              bytes = new Uint8Array(buf);
-              setPdfBytes(bytes);
-            }
-          } catch (e) {
-            console.warn("Could not read native PDF bytes on search:", e);
-          }
-        }
-      }
-      if (bytes && bytes.byteLength > 0) {
-        try {
-          const loadingTask = pdfjsLib.getDocument({
-            data:
-              bytes instanceof Uint8Array
-                ? bytes.slice()
-                : new Uint8Array(bytes).slice(),
-          });
-          activeDoc = await loadingTask.promise;
-          setPdfDoc(activeDoc);
-        } catch (err) {
-          console.warn("Could not load pdf doc for search:", err);
-        }
-      }
-    }
-
-    const rawQ = searchQuery.trim();
-    if (!activeDoc || !rawQ) {
-      setSearchResults([]);
-      setSearchIndex(0);
-      setIsSearching(false);
-      return;
-    }
+    if (!pdfDoc || !searchQuery.trim()) return;
 
     setIsSearching(true);
-    // Normalize quotes, dashes, and extra whitespace for flexible matching
-    const q = rawQ
-      .toLowerCase()
-      .replace(/[\u2018\u2019]/g, "'")
-      .replace(/[\u201C\u201D]/g, '"')
-      .replace(/[\u2013\u2014]/g, "-")
-      .replace(/\s+/g, " ");
-
+    const q = searchQuery.toLowerCase().trim();
     const matches: SearchMatch[] = [];
 
     try {
-      const docPages = activeDoc.numPages || numPages || 1;
-      for (let p = 1; p <= docPages; p++) {
-        const page = await activeDoc.getPage(p);
-        const viewport = page.getViewport({ scale: 1.0, rotation });
+      for (let p = 1; p <= numPages; p++) {
+        const page = await pdfDoc.getPage(p);
         const content = await page.getTextContent();
-        let matchesOnThisPage = 0;
-
-        // 1. Precise single-item searches
-        const matchedItemIndices = new Set<number>();
-
-        for (let itemIdx = 0; itemIdx < content.items.length; itemIdx++) {
-          const item: any = content.items[itemIdx];
-          if (!item || typeof item.str !== "string" || !item.str.trim()) continue;
-
-          const itemStr = item.str;
-          const itemLower = itemStr
-            .toLowerCase()
-            .replace(/[\u2018\u2019]/g, "'")
-            .replace(/[\u201C\u201D]/g, '"')
-            .replace(/[\u2013\u2014]/g, "-")
-            .replace(/\s+/g, " ");
-
-          let fromIdx = 0;
-          while (fromIdx < itemLower.length) {
-            const foundIdx = itemLower.indexOf(q, fromIdx);
-            if (foundIdx === -1) break;
-
-            matchedItemIndices.add(itemIdx);
-
-            let left = 40;
-            let top = 100;
-            let width = 50;
-            let height = 14;
-
-            if (
-              item.transform &&
-              Array.isArray(item.transform) &&
-              item.transform.length >= 6
-            ) {
-              const tx = item.transform[4];
-              const ty = item.transform[5];
-              const itemW = item.width || Math.max(12, itemStr.length * 7);
-              const itemH =
-                item.height ||
-                Math.abs(item.transform[3]) ||
-                Math.abs(item.transform[0]) ||
-                12;
-
-              if (typeof viewport.convertToViewportRectangle === "function") {
-                const rect = viewport.convertToViewportRectangle([
-                  tx,
-                  ty,
-                  tx + itemW,
-                  ty + itemH,
-                ]);
-                const minX = Math.min(rect[0], rect[2]);
-                const minY = Math.min(rect[1], rect[3]);
-                const maxX = Math.max(rect[0], rect[2]);
-                const maxY = Math.max(rect[1], rect[3]);
-                const boxW = Math.max(1, maxX - minX);
-                const boxH = Math.max(1, maxY - minY);
-
-                const totalChars = Math.max(1, itemStr.length);
-                const charStartRatio = foundIdx / totalChars;
-                const charLenRatio = Math.min(1, q.length / totalChars);
-
-                left =
-                  ((minX + boxW * charStartRatio) / viewport.width) * 100;
-                top = (minY / viewport.height) * 100;
-                width = ((boxW * charLenRatio) / viewport.width) * 100;
-                height = (boxH / viewport.height) * 100;
-              } else {
-                const minX = tx;
-                const minY = viewport.height - ty - itemH;
-                const totalChars = Math.max(1, itemStr.length);
-                left =
-                  ((minX + itemW * (foundIdx / totalChars)) /
-                    viewport.width) *
-                  100;
-                top = (minY / viewport.height) * 100;
-                width = ((itemW * (q.length / totalChars)) / viewport.width) * 100;
-                height = (itemH / viewport.height) * 100;
-              }
-            }
-
-            left = Math.max(0, Math.min(98, left));
-            top = Math.max(0, Math.min(98, top));
-            width = Math.max(1.8, Math.min(100 - left, width));
-            height = Math.max(1.5, Math.min(100 - top, height));
-
-            const snippetStart = Math.max(0, foundIdx - 20);
-            const snippetEnd = Math.min(itemStr.length, foundIdx + q.length + 30);
-            const snippet = `...${itemStr.substring(snippetStart, snippetEnd).trim()}...`;
-
-            matches.push({
-              page: p,
-              snippet,
-              box: {
-                id: `p${p}-m${matches.length}-${foundIdx}`,
-                page: p,
-                left,
-                top,
-                width,
-                height,
-              },
-            });
-
-            matchesOnThisPage++;
-            fromIdx = foundIdx + Math.max(1, q.length);
-          }
-        }
-
-        // 2. Cross-item and multi-word searches (e.g. phrases spanning words or items)
-        const itemCharSpans: Array<{
-          idx: number;
-          start: number;
-          end: number;
-          str: string;
-          item: any;
-        }> = [];
-        let fullPageText = "";
-
-        for (let i = 0; i < content.items.length; i++) {
-          const item: any = content.items[i];
-          const str = (item && typeof item.str === "string" ? item.str : "").trim();
-          if (!str) continue;
-          const start = fullPageText.length;
-          fullPageText += (fullPageText ? " " : "") + str;
-          const end = fullPageText.length;
-          itemCharSpans.push({ idx: i, start, end, str, item });
-        }
-
-        const fullLower = fullPageText
-          .toLowerCase()
-          .replace(/[\u2018\u2019]/g, "'")
-          .replace(/[\u201C\u201D]/g, '"')
-          .replace(/[\u2013\u2014]/g, "-")
-          .replace(/\s+/g, " ");
-
-        let pIdx = 0;
-        while (pIdx < fullLower.length) {
-          const matchIdx = fullLower.indexOf(q, pIdx);
-          if (matchIdx === -1) break;
-
-          const matchEnd = matchIdx + q.length;
-
-          // Check if this match was already found by an individual single-item match
-          const coveringItems = itemCharSpans.filter(
-            (sp) => sp.start <= matchEnd && sp.end >= matchIdx,
-          );
-
-          const alreadyHandled =
-            coveringItems.length === 1 &&
-            matchedItemIndices.has(coveringItems[0].idx);
-
-          if (!alreadyHandled && coveringItems.length > 0) {
-            // Compute combined bounding box for all covering items
-            let minBoxX = 100;
-            let minBoxY = 100;
-            let maxBoxX = 0;
-            let maxBoxY = 0;
-            let hasTransform = false;
-
-            for (const sp of coveringItems) {
-              const item = sp.item;
-              if (
-                item.transform &&
-                Array.isArray(item.transform) &&
-                item.transform.length >= 6
-              ) {
-                hasTransform = true;
-                const tx = item.transform[4];
-                const ty = item.transform[5];
-                const itemW = item.width || Math.max(12, sp.str.length * 7);
-                const itemH =
-                  item.height ||
-                  Math.abs(item.transform[3]) ||
-                  Math.abs(item.transform[0]) ||
-                  12;
-
-                if (typeof viewport.convertToViewportRectangle === "function") {
-                  const rect = viewport.convertToViewportRectangle([
-                    tx,
-                    ty,
-                    tx + itemW,
-                    ty + itemH,
-                  ]);
-                  const x1 = Math.min(rect[0], rect[2]);
-                  const y1 = Math.min(rect[1], rect[3]);
-                  const x2 = Math.max(rect[0], rect[2]);
-                  const y2 = Math.max(rect[1], rect[3]);
-
-                  minBoxX = Math.min(minBoxX, (x1 / viewport.width) * 100);
-                  minBoxY = Math.min(minBoxY, (y1 / viewport.height) * 100);
-                  maxBoxX = Math.max(maxBoxX, (x2 / viewport.width) * 100);
-                  maxBoxY = Math.max(maxBoxY, (y2 / viewport.height) * 100);
-                } else {
-                  const x1 = (tx / viewport.width) * 100;
-                  const y1 = ((viewport.height - ty - itemH) / viewport.height) * 100;
-                  const x2 = ((tx + itemW) / viewport.width) * 100;
-                  const y2 = ((viewport.height - ty) / viewport.height) * 100;
-
-                  minBoxX = Math.min(minBoxX, x1);
-                  minBoxY = Math.min(minBoxY, y1);
-                  maxBoxX = Math.max(maxBoxX, x2);
-                  maxBoxY = Math.max(maxBoxY, y2);
-                }
-              }
-            }
-
-            let boxLeft = 10;
-            let boxTop = (matchIdx / Math.max(1, fullLower.length)) * 85;
-            let boxWidth = 80;
-            let boxHeight = 3.5;
-
-            if (hasTransform && maxBoxX > minBoxX && maxBoxY > minBoxY) {
-              boxLeft = Math.max(0, Math.min(98, minBoxX));
-              boxTop = Math.max(0, Math.min(98, minBoxY));
-              boxWidth = Math.max(2, Math.min(100 - boxLeft, maxBoxX - minBoxX));
-              boxHeight = Math.max(1.8, Math.min(100 - boxTop, maxBoxY - minBoxY));
-            }
-
-            const snippetStart = Math.max(0, matchIdx - 25);
-            const snippetEnd = Math.min(fullPageText.length, matchEnd + 35);
-            const snippet = `...${fullPageText.substring(snippetStart, snippetEnd).trim()}...`;
-
-            matches.push({
-              page: p,
-              snippet,
-              box: {
-                id: `p${p}-m${matches.length}-span-${matchIdx}`,
-                page: p,
-                left: boxLeft,
-                top: boxTop,
-                width: boxWidth,
-                height: boxHeight,
-              },
-            });
-            matchesOnThisPage++;
-          }
-
-          pIdx = matchIdx + Math.max(1, q.length);
+        const text = content.items.map((i: any) => i.str || "").join(" ");
+        if (text.toLowerCase().includes(q)) {
+          const idx = text.toLowerCase().indexOf(q);
+          const start = Math.max(0, idx - 25);
+          const end = Math.min(text.length, idx + q.length + 35);
+          const snippet = `...${text.substring(start, end).trim()}...`;
+          matches.push({ page: p, snippet });
         }
       }
 
@@ -1249,17 +904,16 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
       setIsSearching(false);
 
       if (matches.length > 0) {
-        const firstMatchPage = matches[0].page;
-        if (firstMatchPage !== currentPage) {
-          setCurrentPage(firstMatchPage);
-        }
-        if (canvasRef.current?.setPage) {
-          canvasRef.current.setPage(firstMatchPage);
-        }
+        setCurrentPage(matches[0].page);
+        onShowToast(
+          `Found ${matches.length} matches. Showing match 1 on Page ${matches[0].page}`,
+        );
+      } else {
+        onShowToast(`No matches found for "${searchQuery}"`);
       }
     } catch (err) {
-      console.warn("Search error:", err);
       setIsSearching(false);
+      onShowToast("Search error occurred");
     }
   };
 
@@ -1267,13 +921,10 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
     if (searchResults.length === 0) return;
     const nextIdx = (searchIndex + 1) % searchResults.length;
     setSearchIndex(nextIdx);
-    const targetPage = searchResults[nextIdx].page;
-    if (targetPage !== currentPage) {
-      setCurrentPage(targetPage);
-    }
-    if (canvasRef.current?.setPage) {
-      canvasRef.current.setPage(targetPage);
-    }
+    setCurrentPage(searchResults[nextIdx].page);
+    onShowToast(
+      `Match ${nextIdx + 1} of ${searchResults.length} (Page ${searchResults[nextIdx].page})`,
+    );
   };
 
   const handlePrevSearchMatch = () => {
@@ -1281,37 +932,11 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
     const prevIdx =
       (searchIndex - 1 + searchResults.length) % searchResults.length;
     setSearchIndex(prevIdx);
-    const targetPage = searchResults[prevIdx].page;
-    if (targetPage !== currentPage) {
-      setCurrentPage(targetPage);
-    }
-    if (canvasRef.current?.setPage) {
-      canvasRef.current.setPage(targetPage);
-    }
+    setCurrentPage(searchResults[prevIdx].page);
+    onShowToast(
+      `Match ${prevIdx + 1} of ${searchResults.length} (Page ${searchResults[prevIdx].page})`,
+    );
   };
-
-  const handleCancelSearch = () => {
-    setSearchOpen(false);
-    setSearchQuery("");
-    setSearchResults([]);
-    setSearchIndex(0);
-  };
-
-  // Real-time debounced auto-search while typing in search bar
-  useEffect(() => {
-    if (!searchOpen) return;
-    if (!searchQuery.trim()) {
-      setSearchResults([]);
-      setSearchIndex(0);
-      return;
-    }
-
-    const timer = setTimeout(() => {
-      void handleExecuteSearch();
-    }, 250);
-
-    return () => clearTimeout(timer);
-  }, [searchQuery, searchOpen, pdfDoc, numPages, rotation]);
 
   // 9. Open Another PDF from Native Device Storage or Web
   const handlePickAnotherPdf = async () => {
@@ -1336,10 +961,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
   // 10. Open in Native System Viewer (Apple QuickLook / Android System PDF Reader)
   const handleOpenSystemViewer = async () => {
     const targetSource = nativePdfUri || pdfBytes;
-    if (
-      !targetSource ||
-      (typeof targetSource !== "string" && targetSource.byteLength === 0)
-    ) {
+    if (!targetSource || (typeof targetSource !== "string" && targetSource.byteLength === 0)) {
       onShowToast("PDF data not ready");
       return;
     }
@@ -1493,7 +1115,6 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
   };
 
   const t = getThemeColors();
-  const isLight = theme === "light";
 
   return (
     <View style={[styles.container, { backgroundColor: t.bg }]}>
@@ -1537,646 +1158,460 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
             )}
 
             {/* Load Error State */}
-            {loadError && !isLoading && (
-              <View style={styles.errorContainer}>
-                <Ionicons
-                  name="alert-circle-outline"
-                  size={48}
-                  color="#ff516a"
-                />
-                <Text style={styles.errorTitle}>Unable to read this PDF</Text>
-                <Text style={styles.errorSubtitle}>{loadError}</Text>
+        {loadError && !isLoading && (
+          <View style={styles.errorContainer}>
+            <Ionicons name="alert-circle-outline" size={48} color="#ff516a" />
+            <Text style={styles.errorTitle}>Unable to read this PDF</Text>
+            <Text style={styles.errorSubtitle}>{loadError}</Text>
+            <TouchableOpacity
+              onPress={handlePickAnotherPdf}
+              style={styles.retryBtn}
+              activeOpacity={0.8}
+            >
+              <Ionicons
+                name="folder-open-outline"
+                size={16}
+                color="#ffffff"
+                style={{ marginRight: 6 }}
+              />
+              <Text style={styles.retryBtnText}>
+                Choose Another PDF from Device
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* 1. REFLOW / PURE TEXT READER MODE */}
+        {!isLoading && !loadError && reflow && (
+          <View
+            style={[
+              styles.reflowContainer,
+              { backgroundColor: t.paperBg, borderColor: t.border },
+            ]}
+          >
+            <View style={styles.reflowHeader}>
+              <View style={styles.reflowPageBadge}>
+                <Ionicons name="document-text" size={13} color="#0284c7" />
+                <Text style={styles.reflowPageBadgeText}>
+                  REFLOW • PAGE {currentPage} OF {numPages}
+                </Text>
+              </View>
+              <View style={styles.reflowControls}>
                 <TouchableOpacity
-                  onPress={handlePickAnotherPdf}
-                  style={styles.retryBtn}
-                  activeOpacity={0.8}
+                  onPress={() =>
+                    handleUpdateFontSize(Math.max(12, reflowFontSize - 2))
+                  }
+                  style={styles.reflowBtn}
+                  accessibilityLabel="Decrease Font Size"
                 >
-                  <Ionicons
-                    name="folder-open-outline"
-                    size={16}
-                    color="#ffffff"
-                    style={{ marginRight: 6 }}
-                  />
-                  <Text style={styles.retryBtnText}>
-                    Choose Another PDF from Device
+                  <Text style={styles.reflowBtnText}>A-</Text>
+                </TouchableOpacity>
+
+                <View style={styles.reflowFontSizeBadge}>
+                  <Text style={styles.reflowFontSizeText}>
+                    {reflowFontSize}px
                   </Text>
+                </View>
+
+                <TouchableOpacity
+                  onPress={() =>
+                    handleUpdateFontSize(Math.min(32, reflowFontSize + 2))
+                  }
+                  style={styles.reflowBtn}
+                  accessibilityLabel="Increase Font Size"
+                >
+                  <Text style={styles.reflowBtnText}>A+</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={() => setShowViewModeModal(true)}
+                  style={styles.reflowOptionsBtn}
+                  accessibilityLabel="View Mode Options"
+                >
+                  <MaterialIcons name="tune" size={14} color="#7bd0ff" />
+                  <Text style={styles.reflowOptionsBtnText}>Options</Text>
                 </TouchableOpacity>
               </View>
-            )}
+            </View>
 
-            {/* 1. REFLOW / PURE TEXT READER MODE */}
-            {!isLoading && !loadError && reflow && (
+            <View style={styles.reflowParagraphsContainer}>
+              {reflowParagraphs.map((para, idx) => (
+                <Text
+                  key={idx}
+                  style={[
+                    styles.reflowParagraph,
+                    {
+                      color: t.text,
+                      fontSize: reflowFontSize,
+                      lineHeight: Math.round(reflowFontSize * 1.68),
+                    },
+                  ]}
+                >
+                  {para}
+                </Text>
+              ))}
+            </View>
+          </View>
+        )}
+
+        {/* 2. REAL CANVAS / NATIVE PDF RENDERING */}
+        {!isLoading &&
+          !loadError &&
+          !reflow &&
+          (Platform.OS !== "web" || viewMode === "single") && (
+            <View
+              style={[
+                styles.pageOuterWrapper,
+                {
+                  minHeight:
+                    Platform.OS !== "web"
+                      ? Math.max(0, windowHeight - 140)
+                      : undefined,
+                },
+              ]}
+            >
               <View
                 style={[
-                  styles.reflowContainer,
-                  { backgroundColor: t.paperBg, borderColor: t.border },
+                  styles.pdfPaper,
+                  {
+                    backgroundColor: t.paperBg,
+                    borderColor: "transparent",
+                    minHeight:
+                      Platform.OS !== "web"
+                        ? Math.max(0, windowHeight - 140)
+                        : undefined,
+                    width:
+                      Platform.OS === "web" && zoom > 1
+                        ? `${Math.round(zoom * 100)}%`
+                        : "100%",
+                  },
                 ]}
               >
-                <View style={styles.reflowHeader}>
-                  <View style={styles.reflowPageBadge}>
-                    <Ionicons name="document-text" size={13} color="#0284c7" />
-                    <Text style={styles.reflowPageBadgeText}>
-                      REFLOW • PAGE {currentPage} OF {numPages}
-                    </Text>
-                  </View>
-                  <View style={styles.reflowControls}>
-                    <TouchableOpacity
-                      onPress={() =>
-                        handleUpdateFontSize(Math.max(12, reflowFontSize - 2))
-                      }
-                      style={styles.reflowBtn}
-                      accessibilityLabel="Decrease Font Size"
-                    >
-                      <Text style={styles.reflowBtnText}>A-</Text>
-                    </TouchableOpacity>
-
-                    <View style={styles.reflowFontSizeBadge}>
-                      <Text style={styles.reflowFontSizeText}>
-                        {reflowFontSize}px
-                      </Text>
-                    </View>
-
-                    <TouchableOpacity
-                      onPress={() =>
-                        handleUpdateFontSize(Math.min(32, reflowFontSize + 2))
-                      }
-                      style={styles.reflowBtn}
-                      accessibilityLabel="Increase Font Size"
-                    >
-                      <Text style={styles.reflowBtnText}>A+</Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      onPress={() => setShowViewModeModal(true)}
-                      style={styles.reflowOptionsBtn}
-                      accessibilityLabel="View Mode Options"
-                    >
-                      <MaterialIcons name="tune" size={14} color="#7bd0ff" />
-                      <Text style={styles.reflowOptionsBtnText}>Options</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-
-                <View style={styles.reflowParagraphsContainer}>
-                  {reflowParagraphs.map((para, idx) => {
-                    const q = searchQuery.toLowerCase().trim();
-                    if (!searchOpen || !q || !para.toLowerCase().includes(q)) {
-                      return (
-                        <Text
-                          key={idx}
-                          style={[
-                            styles.reflowParagraph,
-                            {
-                              color: t.text,
-                              fontSize: reflowFontSize,
-                              lineHeight: Math.round(reflowFontSize * 1.68),
-                            },
-                          ]}
-                        >
-                          {para}
-                        </Text>
-                      );
-                    }
-
-                    const parts: React.ReactNode[] = [];
-                    let lastIdx = 0;
-                    const pLower = para.toLowerCase();
-                    let matchIdx = pLower.indexOf(q, lastIdx);
-
-                    while (matchIdx !== -1) {
-                      if (matchIdx > lastIdx) {
-                        parts.push(para.substring(lastIdx, matchIdx));
-                      }
-                      const matchedText = para.substring(
-                        matchIdx,
-                        matchIdx + q.length,
-                      );
-                      parts.push(
-                        <Text
-                          key={`hl-${idx}-${matchIdx}`}
-                          style={styles.reflowSearchHighlight}
-                        >
-                          {matchedText}
-                        </Text>,
-                      );
-                      lastIdx = matchIdx + q.length;
-                      matchIdx = pLower.indexOf(q, lastIdx);
-                    }
-                    if (lastIdx < para.length) {
-                      parts.push(para.substring(lastIdx));
-                    }
-
-                    return (
-                      <Text
-                        key={idx}
-                        style={[
-                          styles.reflowParagraph,
-                          {
-                            color: t.text,
-                            fontSize: reflowFontSize,
-                            lineHeight: Math.round(reflowFontSize * 1.68),
-                          },
-                        ]}
-                      >
-                        {parts}
-                      </Text>
-                    );
-                  })}
-                </View>
-              </View>
-            )}
-
-            {/* 2. REAL CANVAS / NATIVE PDF RENDERING */}
-            {!isLoading &&
-              !loadError &&
-              !reflow &&
-              (Platform.OS !== "web" || viewMode === "single") && (
+                {/* Canvas viewport container */}
                 <View
                   style={[
-                    styles.pageOuterWrapper,
+                    styles.canvasRelativeWrapper,
                     {
+                      width: "100%",
+                      filter: t.canvasFilter as any,
                       minHeight:
                         Platform.OS !== "web"
                           ? Math.max(0, windowHeight - 140)
                           : undefined,
                     },
                   ]}
-                >
-                  <View
-                    style={[
-                      styles.pdfPaper,
-                      {
-                        backgroundColor: t.paperBg,
-                        borderColor: "transparent",
-                        minHeight:
-                          Platform.OS !== "web"
-                            ? Math.max(0, windowHeight - 140)
-                            : undefined,
-                        width:
-                          Platform.OS === "web" && zoom > 1
-                            ? `${Math.round(zoom * 100)}%`
-                            : "100%",
-                      },
-                    ]}
-                  >
-                    {/* Canvas viewport container */}
-                    <View
-                      style={[
-                        styles.canvasRelativeWrapper,
-                        {
-                          width: "100%",
-                          filter: t.canvasFilter as any,
-                          minHeight:
-                            Platform.OS !== "web"
-                              ? Math.max(0, windowHeight - 140)
-                              : undefined,
+                  {...(Platform.OS === "web"
+                    ? {
+                        onClick: (e: any) => {
+                          handleCanvasClick(e);
+                          handleSingleTap();
                         },
-                      ]}
-                      {...(Platform.OS === "web"
-                        ? {
-                            onClick: (e: any) => {
-                              handleCanvasClick(e);
-                              handleSingleTap();
-                            },
-                            onMouseDown: startDrawing,
-                            onMouseMove: drawMove,
-                            onMouseUp: stopDrawing,
-                            onMouseLeave: stopDrawing,
-                          }
-                        : {})}
-                    >
-                      {/* Visual PDF Document View: Using react-native-pdf Package */}
-                      {pdfSource.uri ? (
-                        <Pdf
-                          ref={canvasRef as any}
-                          source={pdfSource}
-                          page={currentPage}
-                          scale={Platform.OS === "web" ? zoom : nativeScale}
-                          {...({ rotation } as any)}
-                          minScale={0.5}
-                          maxScale={4.0}
-                          fitPolicy={0}
-                          enablePaging={viewMode === "single"}
-                          enableAntialiasing={true}
-                          enableDoubleTapZoom={true}
-                          spacing={10}
-                          renderActivityIndicator={() => <View />}
-                          horizontal={readingDirection === "horizontal"}
-                          onPageSingleTap={handleSingleTap}
-                          onScaleChanged={handleScaleChanged}
-                          onLoadComplete={(loadedPages) => {
-                            setNumPages(loadedPages);
-                            setIsLoading(false);
-                            triggerPageInteraction();
-                            if (docId && loadedPages > 0) {
-                              pdfStore.updatePageCount(docId, loadedPages);
-                            }
-                          }}
-                          onPageChanged={(page, total) => {
-                            setCurrentPage((prev) =>
-                              prev !== page ? page : prev,
-                            );
-                            setNumPages((prev) =>
-                              prev !== total ? total : prev,
-                            );
-                            triggerPageInteraction();
-                          }}
-                          onError={(err) => {
-                            console.warn("react-native-pdf view note:", err);
-                          }}
-                          style={styles.pdfViewer}
-                        />
-                      ) : (
-                        <ActivityIndicator size="small" color="#7bd0ff" />
-                      )}
-
-                      {/* Freehand Drawing Overlay Canvas */}
-                      {Platform.OS === "web" && (
-                        <canvas
-                          ref={drawCanvasRef}
-                          style={{
-                            position: "absolute",
-                            top: 0,
-                            left: 0,
-                            width: "100%",
-                            height: "100%",
-                            pointerEvents:
-                              activeTool === "pen" ||
-                              activeTool === "highlighter"
-                                ? "auto"
-                                : "none",
-                            maxWidth: "100%",
-                          }}
-                        />
-                      )}
-
-                      {/* Search Results Highlights in File */}
-                      {searchOpen &&
-                        searchQuery.trim().length > 0 &&
-                        searchResults
-                          .filter((m) => m.page === currentPage)
-                          .map((m, idx) => {
-                            const isCurrent =
-                              searchResults[searchIndex] &&
-                              searchResults[searchIndex].box.id === m.box.id;
-                            return (
-                              <View
-                                key={m.box.id || `hl-${idx}`}
-                                style={[
-                                  styles.searchHighlightBox,
-                                  {
-                                    top: `${m.box.top}%` as any,
-                                    left: `${m.box.left}%` as any,
-                                    width: `${m.box.width}%` as any,
-                                    height: `${m.box.height}%` as any,
-                                    backgroundColor: isCurrent
-                                      ? "rgba(255, 140, 0, 0.48)"
-                                      : "rgba(255, 235, 59, 0.45)",
-                                    borderColor: isCurrent
-                                      ? "#ea580c"
-                                      : "rgba(234, 179, 8, 0.75)",
-                                    borderWidth: isCurrent ? 2 : 1,
-                                  },
-                                ]}
-                                pointerEvents="none"
-                              />
-                            );
-                          })}
-
-                      {/* Notes and Stamps Overlays */}
-                      {notes
-                        .filter((n) => n.page === currentPage)
-                        .map((note) => (
-                          <View
-                            key={note.id}
-                            style={[
-                              styles.notePin,
-                              {
-                                top: `${note.y}%` as any,
-                                left: `${note.x}%` as any,
-                              },
-                            ]}
-                          >
-                            <TouchableOpacity
-                              onPress={() => setActiveNoteEditing(note.id)}
-                              style={styles.notePinIcon}
-                            >
-                              <Ionicons
-                                name="chatbubble"
-                                size={20}
-                                color="#f59e0b"
-                              />
-                            </TouchableOpacity>
-                            {activeNoteEditing === note.id && (
-                              <View style={styles.noteEditorCard}>
-                                <TextInput
-                                  value={newNoteInput}
-                                  onChangeText={setNewNoteInput}
-                                  style={styles.noteEditorInput}
-                                  multiline
-                                />
-                                <View style={styles.noteEditorActions}>
-                                  <TouchableOpacity
-                                    onPress={() => {
-                                      setNotes((prev) =>
-                                        prev.map((n) =>
-                                          n.id === note.id
-                                            ? { ...n, text: newNoteInput }
-                                            : n,
-                                        ),
-                                      );
-                                      setActiveNoteEditing(null);
-                                      onShowToast("Note updated");
-                                    }}
-                                    style={styles.noteSaveBtn}
-                                  >
-                                    <Text style={styles.noteSaveBtnText}>
-                                      Save
-                                    </Text>
-                                  </TouchableOpacity>
-                                  <TouchableOpacity
-                                    onPress={() => {
-                                      setNotes((prev) =>
-                                        prev.filter((n) => n.id !== note.id),
-                                      );
-                                      setActiveNoteEditing(null);
-                                    }}
-                                    style={styles.noteDeleteBtn}
-                                  >
-                                    <Text style={styles.noteDeleteBtnText}>
-                                      Delete
-                                    </Text>
-                                  </TouchableOpacity>
-                                </View>
-                              </View>
-                            )}
-                          </View>
-                        ))}
-
-                      {stamps
-                        .filter((s) => s.page === currentPage)
-                        .map((stamp) => (
-                          <View
-                            key={stamp.id}
-                            style={[
-                              styles.stampOverlay,
-                              {
-                                top: `${stamp.y}%` as any,
-                                left: `${stamp.x}%` as any,
-                              },
-                            ]}
-                          >
-                            <Ionicons
-                              name="shield-checkmark"
-                              size={16}
-                              color="#059669"
-                            />
-                            <Text style={styles.stampOverlayTitle}>
-                              {stamp.title}
-                            </Text>
-                            <Text style={styles.stampOverlayTime}>
-                              {stamp.time}
-                            </Text>
-                          </View>
-                        ))}
-                    </View>
-                  </View>
-                </View>
-              )}
-
-            {/* 3. CONTINUOUS SCROLL VIEW (WEB ONLY) */}
-            {!isLoading &&
-              !loadError &&
-              !reflow &&
-              Platform.OS === "web" &&
-              viewMode === "continuous" &&
-              (readingDirection === "horizontal" ? (
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={true}
-                  contentContainerStyle={styles.continuousContainerHorizontal}
-                  style={{ width: "100%" }}
+                        onMouseDown: startDrawing,
+                        onMouseMove: drawMove,
+                        onMouseUp: stopDrawing,
+                        onMouseLeave: stopDrawing,
+                      }
+                    : {})}
                 >
-                  {Array.from({ length: numPages }, (_, i) => i + 1).map(
-                    (p) => (
-                      <View
-                        key={p}
-                        style={[
-                          styles.continuousPageCardHorizontal,
-                          {
-                            backgroundColor: t.paperBg,
-                            borderColor: t.border,
-                          },
-                        ]}
-                      >
-                        <View style={styles.continuousPageHeader}>
-                          <Text
-                            style={[
-                              styles.continuousPageNum,
-                              { color: t.muted },
-                            ]}
-                          >
-                            Page {p} of {numPages}
-                          </Text>
-                        </View>
-                        <View
-                          style={{
-                            filter: t.canvasFilter as any,
-                            alignItems: "center",
-                            position: "relative",
-                          }}
-                        >
-                          {Platform.OS === "web" ? (
-                            <View
-                              style={{
-                                position: "relative",
-                                maxWidth: "100%",
-                              }}
-                            >
-                              <canvas
-                                ref={(el) => {
-                                  if (el) continuousCanvases.current.set(p, el);
-                                  else continuousCanvases.current.delete(p);
-                                }}
-                                style={{ display: "block", maxWidth: "100%" }}
-                              />
-                              {/* Search Results Highlights in Continuous Page */}
-                              {searchOpen &&
-                                searchQuery.trim().length > 0 &&
-                                searchResults
-                                  .filter((m) => m.page === p)
-                                  .map((m, idx) => {
-                                    const isCurrent =
-                                      searchResults[searchIndex] &&
-                                      searchResults[searchIndex].box.id ===
-                                        m.box.id;
-                                    return (
-                                      <View
-                                        key={m.box.id || `hl-horiz-${idx}`}
-                                        style={[
-                                          styles.searchHighlightBox,
-                                          {
-                                            top: `${m.box.top}%` as any,
-                                            left: `${m.box.left}%` as any,
-                                            width: `${m.box.width}%` as any,
-                                            height: `${m.box.height}%` as any,
-                                            backgroundColor: isCurrent
-                                              ? "rgba(255, 140, 0, 0.48)"
-                                              : "rgba(255, 235, 59, 0.45)",
-                                            borderColor: isCurrent
-                                              ? "#ea580c"
-                                              : "rgba(234, 179, 8, 0.75)",
-                                            borderWidth: isCurrent ? 2 : 1,
-                                          },
-                                        ]}
-                                        pointerEvents="none"
-                                      />
-                                    );
-                                  })}
-                            </View>
-                          ) : (
-                            <View style={styles.nativePdfFallbackCard}>
-                              <Ionicons
-                                name="document-text"
-                                size={32}
-                                color="#7bd0ff"
-                              />
-                              <Text
-                                style={[
-                                  styles.nativePdfFallbackSubtitle,
-                                  { color: t.text, fontWeight: "700" },
-                                ]}
-                              >
-                                Page {p} of {numPages}
-                              </Text>
-                            </View>
-                          )}
-                        </View>
-                      </View>
-                    ),
+                  {/* Visual PDF Document View: Using react-native-pdf Package */}
+                  {pdfSource.uri ? (
+                    <Pdf
+                      ref={canvasRef as any}
+                      source={pdfSource}
+                      scale={Platform.OS === "web" ? zoom : nativeScale}
+                      {...({ rotation } as any)}
+                      minScale={0.5}
+                      maxScale={4.0}
+                      fitPolicy={0}
+                      enablePaging={viewMode === "single"}
+                      enableAntialiasing={true}
+                      enableDoubleTapZoom={true}
+                      spacing={10}
+                      renderActivityIndicator={() => <View />}
+                      horizontal={readingDirection === "horizontal"}
+                      onPageSingleTap={handleSingleTap}
+                      onScaleChanged={handleScaleChanged}
+                      onLoadComplete={(loadedPages) => {
+                        setNumPages(loadedPages);
+                        setIsLoading(false);
+                        triggerPageInteraction();
+                        if (docId && loadedPages > 0) {
+                          pdfStore.updatePageCount(docId, loadedPages);
+                        }
+                      }}
+                      onPageChanged={(page, total) => {
+                        setCurrentPage((prev) => (prev !== page ? page : prev));
+                        setNumPages((prev) => (prev !== total ? total : prev));
+                        triggerPageInteraction();
+                      }}
+                      onError={(err) => {
+                        console.warn("react-native-pdf view note:", err);
+                      }}
+                      style={styles.pdfViewer}
+                    />
+                  ) : (
+                    <ActivityIndicator size="small" color="#7bd0ff" />
                   )}
-                </ScrollView>
-              ) : (
-                <View
-                  ref={continuousContainerRef}
-                  style={styles.continuousContainer}
-                >
-                  {Array.from({ length: numPages }, (_, i) => i + 1).map(
-                    (p) => (
+
+                  {/* Freehand Drawing Overlay Canvas */}
+                  {Platform.OS === "web" && (
+                    <canvas
+                      ref={drawCanvasRef}
+                      style={{
+                        position: "absolute",
+                        top: 0,
+                        left: 0,
+                        width: "100%",
+                        height: "100%",
+                        pointerEvents:
+                          activeTool === "pen" || activeTool === "highlighter"
+                            ? "auto"
+                            : "none",
+                        maxWidth: "100%",
+                      }}
+                    />
+                  )}
+
+                  {/* Notes and Stamps Overlays */}
+                  {notes
+                    .filter((n) => n.page === currentPage)
+                    .map((note) => (
                       <View
-                        key={p}
+                        key={note.id}
                         style={[
-                          styles.continuousPageCard,
+                          styles.notePin,
                           {
-                            backgroundColor: t.paperBg,
-                            borderColor: t.border,
+                            top: `${note.y}%` as any,
+                            left: `${note.x}%` as any,
                           },
                         ]}
                       >
-                        <View style={styles.continuousPageHeader}>
-                          <Text
-                            style={[
-                              styles.continuousPageNum,
-                              { color: t.muted },
-                            ]}
-                          >
-                            Page {p} of {numPages}
-                          </Text>
-                        </View>
-                        <View
-                          style={{
-                            filter: t.canvasFilter as any,
-                            alignItems: "center",
-                            position: "relative",
-                          }}
+                        <TouchableOpacity
+                          onPress={() => setActiveNoteEditing(note.id)}
+                          style={styles.notePinIcon}
                         >
-                          {Platform.OS === "web" ? (
-                            <View
-                              style={{
-                                position: "relative",
-                                maxWidth: "100%",
-                              }}
-                            >
-                              <canvas
-                                ref={(el) => {
-                                  if (el) continuousCanvases.current.set(p, el);
-                                  else continuousCanvases.current.delete(p);
-                                }}
-                                style={{ display: "block", maxWidth: "100%" }}
-                              />
-                              {/* Search Results Highlights in Continuous Page */}
-                              {searchOpen &&
-                                searchQuery.trim().length > 0 &&
-                                searchResults
-                                  .filter((m) => m.page === p)
-                                  .map((m, idx) => {
-                                    const isCurrent =
-                                      searchResults[searchIndex] &&
-                                      searchResults[searchIndex].box.id ===
-                                        m.box.id;
-                                    return (
-                                      <View
-                                        key={m.box.id || `hl-cont-${idx}`}
-                                        style={[
-                                          styles.searchHighlightBox,
-                                          {
-                                            top: `${m.box.top}%` as any,
-                                            left: `${m.box.left}%` as any,
-                                            width: `${m.box.width}%` as any,
-                                            height: `${m.box.height}%` as any,
-                                            backgroundColor: isCurrent
-                                              ? "rgba(255, 140, 0, 0.48)"
-                                              : "rgba(255, 235, 59, 0.45)",
-                                            borderColor: isCurrent
-                                              ? "#ea580c"
-                                              : "rgba(234, 179, 8, 0.75)",
-                                            borderWidth: isCurrent ? 2 : 1,
-                                          },
-                                        ]}
-                                        pointerEvents="none"
-                                      />
-                                    );
-                                  })}
-                            </View>
-                          ) : (
-                            <View style={styles.nativePdfFallbackCard}>
-                              <Ionicons
-                                name="document-text"
-                                size={32}
-                                color="#7bd0ff"
-                              />
-                              <Text
-                                style={[
-                                  styles.nativePdfFallbackSubtitle,
-                                  { color: t.text, fontWeight: "700" },
-                                ]}
-                              >
-                                Page {p} of {numPages}
-                              </Text>
+                          <Ionicons
+                            name="chatbubble"
+                            size={20}
+                            color="#f59e0b"
+                          />
+                        </TouchableOpacity>
+                        {activeNoteEditing === note.id && (
+                          <View style={styles.noteEditorCard}>
+                            <TextInput
+                              value={newNoteInput}
+                              onChangeText={setNewNoteInput}
+                              style={styles.noteEditorInput}
+                              multiline
+                            />
+                            <View style={styles.noteEditorActions}>
                               <TouchableOpacity
-                                style={styles.nativeContinuousBtn}
-                                onPress={handleOpenSystemViewer}
+                                onPress={() => {
+                                  setNotes((prev) =>
+                                    prev.map((n) =>
+                                      n.id === note.id
+                                        ? { ...n, text: newNoteInput }
+                                        : n,
+                                    ),
+                                  );
+                                  setActiveNoteEditing(null);
+                                  onShowToast("Note updated");
+                                }}
+                                style={styles.noteSaveBtn}
                               >
-                                <Ionicons
-                                  name="open-outline"
-                                  size={14}
-                                  color="#0d0096"
-                                />
-                                <Text style={styles.nativeContinuousBtnText}>
-                                  Open with System Viewer
+                                <Text style={styles.noteSaveBtnText}>Save</Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity
+                                onPress={() => {
+                                  setNotes((prev) =>
+                                    prev.filter((n) => n.id !== note.id),
+                                  );
+                                  setActiveNoteEditing(null);
+                                }}
+                                style={styles.noteDeleteBtn}
+                              >
+                                <Text style={styles.noteDeleteBtnText}>
+                                  Delete
                                 </Text>
                               </TouchableOpacity>
                             </View>
-                          )}
-                        </View>
+                          </View>
+                        )}
                       </View>
-                    ),
-                  )}
+                    ))}
+
+                  {stamps
+                    .filter((s) => s.page === currentPage)
+                    .map((stamp) => (
+                      <View
+                        key={stamp.id}
+                        style={[
+                          styles.stampOverlay,
+                          {
+                            top: `${stamp.y}%` as any,
+                            left: `${stamp.x}%` as any,
+                          },
+                        ]}
+                      >
+                        <Ionicons
+                          name="shield-checkmark"
+                          size={16}
+                          color="#059669"
+                        />
+                        <Text style={styles.stampOverlayTitle}>
+                          {stamp.title}
+                        </Text>
+                        <Text style={styles.stampOverlayTime}>
+                          {stamp.time}
+                        </Text>
+                      </View>
+                    ))}
+                </View>
+              </View>
+            </View>
+          )}
+
+        {/* 3. CONTINUOUS SCROLL VIEW (WEB ONLY) */}
+        {!isLoading &&
+          !loadError &&
+          !reflow &&
+          Platform.OS === "web" &&
+          viewMode === "continuous" &&
+          (readingDirection === "horizontal" ? (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={true}
+              contentContainerStyle={styles.continuousContainerHorizontal}
+              style={{ width: "100%" }}
+            >
+              {Array.from({ length: numPages }, (_, i) => i + 1).map((p) => (
+                <View
+                  key={p}
+                  style={[
+                    styles.continuousPageCardHorizontal,
+                    {
+                      backgroundColor: t.paperBg,
+                      borderColor: t.border,
+                    },
+                  ]}
+                >
+                  <View style={styles.continuousPageHeader}>
+                    <Text
+                      style={[styles.continuousPageNum, { color: t.muted }]}
+                    >
+                      Page {p} of {numPages}
+                    </Text>
+                  </View>
+                  <View
+                    style={{
+                      filter: t.canvasFilter as any,
+                      alignItems: "center",
+                    }}
+                  >
+                    {Platform.OS === "web" ? (
+                      <canvas
+                        ref={(el) => {
+                          if (el) continuousCanvases.current.set(p, el);
+                          else continuousCanvases.current.delete(p);
+                        }}
+                        style={{ display: "block", maxWidth: "100%" }}
+                      />
+                    ) : (
+                      <View style={styles.nativePdfFallbackCard}>
+                        <Ionicons
+                          name="document-text"
+                          size={32}
+                          color="#7bd0ff"
+                        />
+                        <Text
+                          style={[
+                            styles.nativePdfFallbackSubtitle,
+                            { color: t.text, fontWeight: "700" },
+                          ]}
+                        >
+                          Page {p} of {numPages}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
                 </View>
               ))}
+            </ScrollView>
+          ) : (
+            <View
+              ref={continuousContainerRef}
+              style={styles.continuousContainer}
+            >
+              {Array.from({ length: numPages }, (_, i) => i + 1).map((p) => (
+                <View
+                  key={p}
+                  style={[
+                    styles.continuousPageCard,
+                    {
+                      backgroundColor: t.paperBg,
+                      borderColor: t.border,
+                    },
+                  ]}
+                >
+                  <View style={styles.continuousPageHeader}>
+                    <Text
+                      style={[styles.continuousPageNum, { color: t.muted }]}
+                    >
+                      Page {p} of {numPages}
+                    </Text>
+                  </View>
+                  <View
+                    style={{
+                      filter: t.canvasFilter as any,
+                      alignItems: "center",
+                    }}
+                  >
+                    {Platform.OS === "web" ? (
+                      <canvas
+                        ref={(el) => {
+                          if (el) continuousCanvases.current.set(p, el);
+                          else continuousCanvases.current.delete(p);
+                        }}
+                        style={{ display: "block", maxWidth: "100%" }}
+                      />
+                    ) : (
+                      <View style={styles.nativePdfFallbackCard}>
+                        <Ionicons
+                          name="document-text"
+                          size={32}
+                          color="#7bd0ff"
+                        />
+                        <Text
+                          style={[
+                            styles.nativePdfFallbackSubtitle,
+                            { color: t.text, fontWeight: "700" },
+                          ]}
+                        >
+                          Page {p} of {numPages}
+                        </Text>
+                        <TouchableOpacity
+                          style={styles.nativeContinuousBtn}
+                          onPress={handleOpenSystemViewer}
+                        >
+                          <Ionicons
+                            name="open-outline"
+                            size={14}
+                            color="#0d0096"
+                          />
+                          <Text style={styles.nativeContinuousBtnText}>
+                            Open with System Viewer
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                  </View>
+                </View>
+              ))}
+            </View>
+          ))}
 
-            {/* Real Dynamic Thumbnail Strip */}
-            {/* {showThumbnails && !isLoading && !loadError && (
+        {/* Real Dynamic Thumbnail Strip */}
+        {/* {showThumbnails && !isLoading && !loadError && (
           <View style={styles.thumbnailStrip}>
             <View style={styles.thumbStripHeader}>
               <Text style={styles.thumbStripTitle}>
@@ -2271,24 +1706,11 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
           numPages={numPages}
           searchOpen={searchOpen}
           onToggleSearch={() => {
-            const next = !searchOpen;
-            setSearchOpen(next);
-            if (!next) {
-              handleCancelSearch();
-            } else {
+            setSearchOpen((prev) => !prev);
+            if (!searchOpen) {
               setShowThumbnails(false);
             }
           }}
-          searchQuery={searchQuery}
-          onSearchQueryChange={setSearchQuery}
-          onSearchSubmit={handleExecuteSearch}
-          onClearSearch={() => {
-            setSearchQuery("");
-            setSearchResults([]);
-            setSearchIndex(0);
-          }}
-          onCloseSearch={handleCancelSearch}
-          isSearching={isSearching}
           showThumbnails={showThumbnails}
           onToggleThumbnails={() => {
             setShowThumbnails((prev) => !prev);
@@ -2300,9 +1722,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
           onToggleBookmark={() => {
             setIsBookmarked((prev) => {
               const next = !prev;
-              onShowToast(
-                next ? `Page ${currentPage} bookmarked` : "Bookmark removed",
-              );
+              onShowToast(next ? `Page ${currentPage} bookmarked` : "Bookmark removed");
               return next;
             });
           }}
@@ -2311,15 +1731,76 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
           onDownload={handleDownload}
         />
 
+        {/* Top Search Bar Drawer (Find in Document) */}
+        {searchOpen && (
+          <View style={styles.topSearchDrawer}>
+            <View style={styles.searchInnerRow}>
+              <Ionicons name="search" size={17} color="#7bd0ff" style={{ marginRight: 6 }} />
+              <TextInput
+                style={styles.searchDrawerInputField}
+                placeholder="Find in document..."
+                placeholderTextColor="#908fa0"
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                onSubmitEditing={handleExecuteSearch}
+                returnKeyType="search"
+                autoFocus
+              />
+              {isSearching && (
+                <ActivityIndicator size="small" color="#7bd0ff" style={{ marginHorizontal: 6 }} />
+              )}
+              {searchResults.length > 0 && (
+                <View style={styles.searchMatchCounter}>
+                  <Text style={styles.searchMatchText}>
+                    {searchIndex + 1}/{searchResults.length}
+                  </Text>
+                  <TouchableOpacity
+                    onPress={handlePrevSearchMatch}
+                    style={styles.searchChevronBtn}
+                    accessibilityLabel="Previous match"
+                  >
+                    <Ionicons name="chevron-up" size={16} color="#dae2fd" />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={handleNextSearchMatch}
+                    style={styles.searchChevronBtn}
+                    accessibilityLabel="Next match"
+                  >
+                    <Ionicons name="chevron-down" size={16} color="#dae2fd" />
+                  </TouchableOpacity>
+                </View>
+              )}
+              {searchQuery.trim().length > 0 && (
+                <TouchableOpacity
+                  onPress={handleExecuteSearch}
+                  style={styles.searchExecuteBtn}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.searchExecuteBtnText}>Find</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity
+                onPress={() => {
+                  setSearchOpen(false);
+                  setSearchQuery("");
+                  setSearchResults([]);
+                }}
+                style={styles.searchDrawerCloseBtn}
+                accessibilityLabel="Close search"
+              >
+                <Ionicons name="close" size={18} color="#908fa0" />
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
         {/* Top Thumbnails Carousel Strip */}
         {showThumbnails && !isLoading && !loadError && (
           <View style={styles.topThumbnailStrip}>
             <View style={styles.topThumbStripHeader}>
               <View style={styles.thumbStripTitleGroup}>
                 <Ionicons name="albums-outline" size={15} color="#7bd0ff" />
-                <Text style={styles.topThumbStripTitle}>
-                  PAGES ({numPages})
-                </Text>
+                <Text style={styles.topThumbStripTitle}>PAGES ({numPages})</Text>
               </View>
               <TouchableOpacity
                 onPress={() => setShowThumbnails(false)}
@@ -2333,250 +1814,95 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.thumbScrollContainer}
             >
-              {Array.from({ length: numPages }, (_, idx) => idx + 1).map(
-                (p) => {
-                  const isCur = currentPage === p;
-                  const thumbData = thumbnails[p];
-                  return (
-                    <TouchableOpacity
-                      key={p}
-                      onPress={() => handleSelectPage(p)}
-                      style={[
-                        styles.thumbCardItem,
-                        isCur && styles.thumbCardItemActive,
-                      ]}
-                      activeOpacity={0.7}
-                    >
-                      <View style={styles.thumbCardPreview}>
-                        {thumbData ? (
-                          <Image
-                            source={{ uri: thumbData }}
-                            style={styles.thumbCardImg}
-                            resizeMode="contain"
-                          />
-                        ) : (
-                          <View style={styles.thumbCardPlaceholder}>
-                            <Text style={styles.thumbCardNum}>{p}</Text>
-                          </View>
-                        )}
-                      </View>
-                      <Text
-                        style={[
-                          styles.thumbCardLabel,
-                          isCur && styles.thumbCardLabelActive,
-                        ]}
-                      >
-                        P. {p}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                },
-              )}
+              {Array.from({ length: numPages }, (_, idx) => idx + 1).map((p) => {
+                const isCur = currentPage === p;
+                const thumbData = thumbnails[p];
+                return (
+                  <TouchableOpacity
+                    key={p}
+                    onPress={() => handleSelectPage(p)}
+                    style={[styles.thumbCardItem, isCur && styles.thumbCardItemActive]}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.thumbCardPreview}>
+                      {thumbData ? (
+                        <Image
+                          source={{ uri: thumbData }}
+                          style={styles.thumbCardImg}
+                          resizeMode="contain"
+                        />
+                      ) : (
+                        <View style={styles.thumbCardPlaceholder}>
+                          <Text style={styles.thumbCardNum}>{p}</Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text style={[styles.thumbCardLabel, isCur && styles.thumbCardLabelActive]}>
+                      P. {p}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </ScrollView>
           </View>
         )}
       </Animated.View>
 
-      {/* Search Bottom Bar: Dedicated controls for finding next instance, back, and cancel search */}
-      {searchOpen && (
-        <View
-          style={[
-            styles.bottomSearchContainer,
-            isLight && styles.bottomSearchContainerLight,
-          ]}
-        >
-          {/* Cancel button */}
-          <TouchableOpacity
-            onPress={handleCancelSearch}
-            style={[
-              styles.bottomSearchCancelBtn,
-              isLight && styles.bottomSearchCancelBtnLight,
-            ]}
-            accessibilityLabel="Cancel search"
-            activeOpacity={0.7}
-          >
-            <Text
-              style={[
-                styles.bottomSearchCancelText,
-                isLight && styles.bottomSearchCancelTextLight,
-              ]}
-            >
-              Cancel
-            </Text>
-          </TouchableOpacity>
-
-          {/* Match status counter */}
-          <View style={styles.bottomSearchStatusWrapper}>
-            {isSearching ? (
-              <View style={styles.bottomSearchLoadingRow}>
-                <ActivityIndicator
-                  size="small"
-                  color={isLight ? "#2563eb" : "#7bd0ff"}
-                  style={{ marginRight: 6 }}
-                />
-                <Text
-                  style={[
-                    styles.bottomSearchStatusText,
-                    isLight && styles.bottomSearchStatusTextLight,
-                  ]}
-                >
-                  Searching...
-                </Text>
-              </View>
-            ) : searchResults.length > 0 ? (
-              <View style={styles.bottomSearchCountCol}>
-                <Text
-                  style={[
-                    styles.bottomSearchCountText,
-                    isLight && styles.bottomSearchCountTextLight,
-                  ]}
-                >
-                  {searchIndex + 1} of {searchResults.length}
-                </Text>
-                <Text
-                  style={[
-                    styles.bottomSearchPageSubtext,
-                    isLight && styles.bottomSearchPageSubtextLight,
-                  ]}
-                >
-                  Page {searchResults[searchIndex]?.page || currentPage}
-                </Text>
-              </View>
-            ) : searchQuery.trim().length > 0 ? (
-              <Text
-                style={[
-                  styles.bottomSearchStatusText,
-                  isLight && styles.bottomSearchStatusTextLight,
-                ]}
-              >
-                0 of 0 matches
-              </Text>
-            ) : (
-              <Text
-                style={[
-                  styles.bottomSearchStatusText,
-                  isLight && styles.bottomSearchStatusTextLight,
-                ]}
-              >
-                Type to find
-              </Text>
-            )}
-          </View>
-
-          {/* Navigation buttons: finding previous instance (back) or next instance */}
-          <View style={styles.bottomSearchNavButtons}>
+      {/* Docked Bottom Bar: Absolutely positioned overlay (ZERO layout shift / zero blinks on toggle) */}
+      <Animated.View
+        style={[
+          styles.absoluteBottomBarWrapper,
+          {
+            opacity: barsAnim,
+            transform: [
+              {
+                translateY: barsAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [90, 0],
+                }),
+              },
+            ],
+          },
+        ]}
+        pointerEvents={showBars ? "auto" : "none"}
+      >
+        <View style={styles.dockedBottomBar}>
+          <View style={styles.bottomBarInner}>
             <TouchableOpacity
-              onPress={handlePrevSearchMatch}
-              disabled={searchResults.length === 0}
-              style={[
-                styles.bottomSearchNavBtn,
-                isLight && styles.bottomSearchNavBtnLight,
-                searchResults.length === 0 && styles.bottomSearchNavBtnDisabled,
-              ]}
-              accessibilityLabel="Previous instance"
+              style={styles.viewModeBottomInner}
+              onPress={() => setShowViewModeModal(true)}
               activeOpacity={0.7}
+              accessibilityLabel="View Mode"
+              accessibilityRole="button"
             >
-              <Ionicons
-                name="chevron-up"
-                size={22}
-                color={
-                  searchResults.length === 0
-                    ? isLight
-                      ? "#cbd5e1"
-                      : "#475569"
-                    : isLight
-                      ? "#0f172a"
-                      : "#dae2fd"
-                }
-              />
+              <MaterialIcons name="book" size={23} color="#fff" />
+              <Text style={styles.viewModeBtnTitle}>View Mode</Text>
             </TouchableOpacity>
-
             <TouchableOpacity
-              onPress={handleNextSearchMatch}
-              disabled={searchResults.length === 0}
-              style={[
-                styles.bottomSearchNavBtn,
-                isLight && styles.bottomSearchNavBtnLight,
-                searchResults.length === 0 && styles.bottomSearchNavBtnDisabled,
-              ]}
-              accessibilityLabel="Next instance"
+              style={styles.viewModeBottomInner}
+              onPress={() => {
+                onShowToast("Edit & annotation tools enabled");
+              }}
               activeOpacity={0.7}
+              accessibilityLabel="Edit"
+              accessibilityRole="button"
             >
-              <Ionicons
-                name="chevron-down"
-                size={22}
-                color={
-                  searchResults.length === 0
-                    ? isLight
-                      ? "#cbd5e1"
-                      : "#475569"
-                    : isLight
-                      ? "#0f172a"
-                      : "#dae2fd"
-                }
-              />
+              <MaterialIcons name="edit" size={23} color="#fff" />
+              <Text style={styles.viewModeBtnTitle}>Edit</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.viewModeBottomInner}
+              onPress={() => setShowViewModeModal(true)}
+              activeOpacity={0.7}
+              accessibilityLabel="Settings"
+              accessibilityRole="button"
+            >
+              <MaterialIcons name="settings" size={23} color="#fff" />
+              <Text style={styles.viewModeBtnTitle}>Settings</Text>
             </TouchableOpacity>
           </View>
         </View>
-      )}
-
-      {/* Docked Bottom Bar: When not in search mode */}
-      {!searchOpen && (
-        <Animated.View
-          style={[
-            styles.absoluteBottomBarWrapper,
-            {
-              opacity: barsAnim,
-              transform: [
-                {
-                  translateY: barsAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [90, 0],
-                  }),
-                },
-              ],
-            },
-          ]}
-          pointerEvents={showBars ? "auto" : "none"}
-        >
-          <View style={styles.dockedBottomBar}>
-            <View style={styles.bottomBarInner}>
-              <TouchableOpacity
-                style={styles.viewModeBottomInner}
-                onPress={() => setShowViewModeModal(true)}
-                activeOpacity={0.7}
-                accessibilityLabel="View Mode"
-                accessibilityRole="button"
-              >
-                <MaterialIcons name="book" size={23} color="#fff" />
-                <Text style={styles.viewModeBtnTitle}>View Mode</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.viewModeBottomInner}
-                onPress={() => {
-                  onShowToast("Edit & annotation tools enabled");
-                }}
-                activeOpacity={0.7}
-                accessibilityLabel="Edit"
-                accessibilityRole="button"
-              >
-                <MaterialIcons name="edit" size={23} color="#fff" />
-                <Text style={styles.viewModeBtnTitle}>Edit</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.viewModeBottomInner}
-                onPress={() => setShowViewModeModal(true)}
-                activeOpacity={0.7}
-                accessibilityLabel="Settings"
-                accessibilityRole="button"
-              >
-                <MaterialIcons name="settings" size={23} color="#fff" />
-                <Text style={styles.viewModeBtnTitle}>Settings</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </Animated.View>
-      )}
+      </Animated.View>
 
       {/* Top Left Page Pill: Appears at top-left corner ONLY when user interacts with the page, auto-fades out */}
       <Animated.View
@@ -3771,135 +3097,5 @@ const styles = StyleSheet.create({
   thumbCardLabelActive: {
     color: "#7bd0ff",
     fontWeight: "700",
-  },
-  searchHighlightBox: {
-    position: "absolute",
-    borderRadius: 2,
-    zIndex: 75,
-  },
-  reflowSearchHighlight: {
-    backgroundColor: "rgba(255, 235, 59, 0.7)",
-    color: "#854d0e",
-    fontWeight: "700",
-    borderRadius: 2,
-  },
-  topSearchDrawerLight: {
-    backgroundColor: "#ffffff",
-    borderBottomColor: "#e2e8f0",
-  },
-  searchInnerRowLight: {
-    backgroundColor: "#f8fafc",
-    borderColor: "#cbd5e1",
-  },
-  searchDrawerInputFieldLight: {
-    color: "#0f172a",
-  },
-  searchMatchCounterLight: {
-    backgroundColor: "#e2e8f0",
-  },
-  searchMatchTextLight: {
-    color: "#2563eb",
-  },
-  searchExecuteBtnLight: {
-    backgroundColor: "#2563eb",
-  },
-  searchExecuteBtnTextLight: {
-    color: "#ffffff",
-  },
-  bottomSearchContainer: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 60,
-    backgroundColor: "#131b2e",
-    borderTopWidth: 1,
-    borderTopColor: "#232f48",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-    zIndex: 90,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: -3 },
-    shadowOpacity: 0.35,
-    shadowRadius: 8,
-    elevation: 16,
-  },
-  bottomSearchContainerLight: {
-    backgroundColor: "#ffffff",
-    borderTopColor: "#e2e8f0",
-    shadowOpacity: 0.08,
-  },
-  bottomSearchCancelBtn: {
-    paddingVertical: 8,
-    paddingHorizontal: 8,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  bottomSearchCancelBtnLight: {},
-  bottomSearchCancelText: {
-    color: "#ff7170",
-    fontSize: 15,
-    fontWeight: "600",
-  },
-  bottomSearchCancelTextLight: {
-    color: "#dc2626",
-  },
-  bottomSearchStatusWrapper: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 8,
-  },
-  bottomSearchLoadingRow: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  bottomSearchStatusText: {
-    color: "#908fa0",
-    fontSize: 13,
-    fontWeight: "500",
-  },
-  bottomSearchStatusTextLight: {
-    color: "#64748b",
-  },
-  bottomSearchCountCol: {
-    alignItems: "center",
-  },
-  bottomSearchCountText: {
-    color: "#7bd0ff",
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  bottomSearchCountTextLight: {
-    color: "#2563eb",
-  },
-  bottomSearchPageSubtext: {
-    color: "#908fa0",
-    fontSize: 10,
-    fontWeight: "500",
-  },
-  bottomSearchPageSubtextLight: {
-    color: "#64748b",
-  },
-  bottomSearchNavButtons: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  bottomSearchNavBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: "#1e293b",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  bottomSearchNavBtnLight: {
-    backgroundColor: "#f1f5f9",
-  },
-  bottomSearchNavBtnDisabled: {
-    opacity: 0.3,
   },
 });
