@@ -25,18 +25,34 @@ function decodeLiteralString(raw: string): string {
     .replace(/\\([0-7]{1,3})/g, (_, oct) => String.fromCharCode(parseInt(oct, 8)));
 }
 
+function bytesToLatin1(bytes: Uint8Array): string {
+  if (typeof Buffer !== 'undefined') {
+    try {
+      return Buffer.from(bytes).toString('latin1');
+    } catch {}
+  }
+  if (typeof TextDecoder !== 'undefined') {
+    try {
+      return new TextDecoder('latin1').decode(bytes);
+    } catch {}
+  }
+  let str = '';
+  const len = bytes.length;
+  const chunk = 8192;
+  for (let i = 0; i < len; i += chunk) {
+    const sub = bytes.subarray(i, Math.min(i + chunk, len));
+    str += String.fromCharCode.apply(null, sub as any);
+  }
+  return str;
+}
+
 function extractTextFromStream(rawBytes: Uint8Array): Array<{ str: string; transform?: number[] }> {
   let text = '';
   try {
     const inflated = pako.inflate(rawBytes);
-    text = Buffer.from(inflated).toString('latin1');
+    text = bytesToLatin1(inflated);
   } catch {
-    try {
-      text = Buffer.from(rawBytes).toString('latin1');
-    } catch {
-      // In browser/Hermes environments where Buffer might not be global
-      text = new TextDecoder('latin1').decode(rawBytes);
-    }
+    text = bytesToLatin1(rawBytes);
   }
 
   const items: Array<{ str: string; transform?: number[] }> = [];

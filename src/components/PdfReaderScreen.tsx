@@ -434,27 +434,27 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
           if (currentUri) {
             setNativePdfUri(currentUri);
             setIsLoading(false);
-            return;
           }
         }
 
         if (!currentBytes || !currentItem) {
-          const item = await pdfStore.getPdfData(activeId);
-          if (isCancelled) return;
-          currentItem = item as any;
-          currentBytes = item.data;
-          setPdfBytes(item.data);
-          setActiveTitle(item.name);
-          currentUri = item.nativeUri || currentUri;
+          try {
+            const item = await pdfStore.getPdfData(activeId);
+            if (isCancelled) return;
+            currentItem = item as any;
+            currentBytes = item.data;
+            setPdfBytes(item.data);
+            setActiveTitle(item.name);
+            currentUri = item.nativeUri || currentUri;
+          } catch (e) {
+            console.warn("Could not load pdf data bytes for search indexing:", e);
+          }
         }
 
         if (Platform.OS !== "web") {
           if (currentUri) {
             setNativePdfUri(currentUri);
-            setIsLoading(false);
-            return;
-          }
-          if (!currentUri && currentBytes && currentBytes.byteLength > 0) {
+          } else if (currentBytes && currentBytes.byteLength > 0) {
             currentUri = await getPdfLocalUri(
               currentBytes,
               currentItem?.name || activeTitle,
@@ -463,32 +463,37 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
             setNativePdfUri(currentUri);
           }
           setIsLoading(false);
-          return;
         }
 
-        // On Web, initialize pdfjsLib for search, reflow, and continuous view
-        if (Platform.OS === "web" && currentBytes) {
-          const bufferCopy =
-            currentBytes instanceof Uint8Array
-              ? currentBytes.slice()
-              : new Uint8Array(currentBytes).slice();
+        // Initialize pdfjsLib for search indexing and text highlights across BOTH Web & Native
+        if (currentBytes && currentBytes.byteLength > 0) {
+          try {
+            const bufferCopy =
+              currentBytes instanceof Uint8Array
+                ? currentBytes.slice()
+                : new Uint8Array(currentBytes).slice();
 
-          const loadingTask = pdfjsLib.getDocument({
-            data: bufferCopy,
-          });
+            const loadingTask = pdfjsLib.getDocument({
+              data: bufferCopy,
+            });
 
-          const loadedDoc = await loadingTask.promise;
-          if (isCancelled) return;
-          setPdfDoc(loadedDoc);
-          setNumPages(loadedDoc.numPages);
-          if (docId && loadedDoc.numPages > 0) {
-            pdfStore.updatePageCount(docId, loadedDoc.numPages);
+            const loadedDoc = await loadingTask.promise;
+            if (isCancelled) return;
+            setPdfDoc(loadedDoc);
+            if (loadedDoc.numPages > 0) {
+              setNumPages(loadedDoc.numPages);
+              if (docId) {
+                pdfStore.updatePageCount(docId, loadedDoc.numPages);
+              }
+            }
+            if (Platform.OS === "web") {
+              setCurrentPage(1);
+            }
+          } catch (docErr) {
+            console.warn("Could not index PDF document:", docErr);
           }
-          setCurrentPage(1);
-          setIsLoading(false);
-        } else if (Platform.OS !== "web") {
-          setIsLoading(false);
         }
+        setIsLoading(false);
       } catch (err: any) {
         if (isCancelled) return;
         console.error("Error loading PDF:", err);
@@ -908,9 +913,38 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
 
   // 8. Search Functionality
   const handleExecuteSearch = async () => {
-    if (!pdfDoc || !searchQuery.trim()) {
+    let activeDoc = pdfDoc;
+    if (!activeDoc) {
+      let bytes = pdfBytes;
+      if (!bytes && activeId) {
+        try {
+          const item = await pdfStore.getPdfData(activeId);
+          if (item && item.data) {
+            bytes = item.data;
+            setPdfBytes(item.data);
+          }
+        } catch {}
+      }
+      if (bytes && bytes.byteLength > 0) {
+        try {
+          const loadingTask = pdfjsLib.getDocument({
+            data:
+              bytes instanceof Uint8Array
+                ? bytes.slice()
+                : new Uint8Array(bytes).slice(),
+          });
+          activeDoc = await loadingTask.promise;
+          setPdfDoc(activeDoc);
+        } catch (err) {
+          console.warn("Could not load pdf doc for search:", err);
+        }
+      }
+    }
+
+    if (!activeDoc || !searchQuery.trim()) {
       setSearchResults([]);
       setSearchIndex(0);
+      setIsSearching(false);
       return;
     }
 
@@ -919,8 +953,9 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
     const matches: SearchMatch[] = [];
 
     try {
-      for (let p = 1; p <= numPages; p++) {
-        const page = await pdfDoc.getPage(p);
+      const docPages = activeDoc.numPages || numPages || 1;
+      for (let p = 1; p <= docPages; p++) {
+        const page = await activeDoc.getPage(p);
         const viewport = page.getViewport({ scale: 1.0, rotation });
         const content = await page.getTextContent();
         let matchesOnThisPage = 0;
@@ -1056,17 +1091,17 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
       setIsSearching(false);
 
       if (matches.length > 0) {
-        setCurrentPage(matches[0].page);
-        onShowToast(
-          `Found ${matches.length} matches. Showing match 1 on Page ${matches[0].page}`,
-        );
-      } else {
-        onShowToast(`No matches found for "${searchQuery}"`);
+        const firstMatchPage = matches[0].page;
+        if (firstMatchPage !== currentPage) {
+          setCurrentPage(firstMatchPage);
+        }
+        if (canvasRef.current?.setPage) {
+          canvasRef.current.setPage(firstMatchPage);
+        }
       }
     } catch (err) {
       console.warn("Search error:", err);
       setIsSearching(false);
-      onShowToast("Search error occurred");
     }
   };
 
@@ -1074,10 +1109,13 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
     if (searchResults.length === 0) return;
     const nextIdx = (searchIndex + 1) % searchResults.length;
     setSearchIndex(nextIdx);
-    setCurrentPage(searchResults[nextIdx].page);
-    onShowToast(
-      `Match ${nextIdx + 1} of ${searchResults.length} (Page ${searchResults[nextIdx].page})`,
-    );
+    const targetPage = searchResults[nextIdx].page;
+    if (targetPage !== currentPage) {
+      setCurrentPage(targetPage);
+    }
+    if (canvasRef.current?.setPage) {
+      canvasRef.current.setPage(targetPage);
+    }
   };
 
   const handlePrevSearchMatch = () => {
@@ -1085,15 +1123,25 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
     const prevIdx =
       (searchIndex - 1 + searchResults.length) % searchResults.length;
     setSearchIndex(prevIdx);
-    setCurrentPage(searchResults[prevIdx].page);
-    onShowToast(
-      `Match ${prevIdx + 1} of ${searchResults.length} (Page ${searchResults[prevIdx].page})`,
-    );
+    const targetPage = searchResults[prevIdx].page;
+    if (targetPage !== currentPage) {
+      setCurrentPage(targetPage);
+    }
+    if (canvasRef.current?.setPage) {
+      canvasRef.current.setPage(targetPage);
+    }
+  };
+
+  const handleCancelSearch = () => {
+    setSearchOpen(false);
+    setSearchQuery("");
+    setSearchResults([]);
+    setSearchIndex(0);
   };
 
   // Real-time debounced auto-search while typing in search bar
   useEffect(() => {
-    if (!searchOpen || !pdfDoc) return;
+    if (!searchOpen) return;
     if (!searchQuery.trim()) {
       setSearchResults([]);
       setSearchIndex(0);
@@ -1102,7 +1150,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
 
     const timer = setTimeout(() => {
       void handleExecuteSearch();
-    }, 300);
+    }, 250);
 
     return () => clearTimeout(timer);
   }, [searchQuery, searchOpen, pdfDoc, numPages, rotation]);
@@ -1544,6 +1592,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                         <Pdf
                           ref={canvasRef as any}
                           source={pdfSource}
+                          page={currentPage}
                           scale={Platform.OS === "web" ? zoom : nativeScale}
                           {...({ rotation } as any)}
                           minScale={0.5}
@@ -2064,11 +2113,24 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
           numPages={numPages}
           searchOpen={searchOpen}
           onToggleSearch={() => {
-            setSearchOpen((prev) => !prev);
-            if (!searchOpen) {
+            const next = !searchOpen;
+            setSearchOpen(next);
+            if (!next) {
+              handleCancelSearch();
+            } else {
               setShowThumbnails(false);
             }
           }}
+          searchQuery={searchQuery}
+          onSearchQueryChange={setSearchQuery}
+          onSearchSubmit={handleExecuteSearch}
+          onClearSearch={() => {
+            setSearchQuery("");
+            setSearchResults([]);
+            setSearchIndex(0);
+          }}
+          onCloseSearch={handleCancelSearch}
+          isSearching={isSearching}
           showThumbnails={showThumbnails}
           onToggleThumbnails={() => {
             setShowThumbnails((prev) => !prev);
@@ -2090,123 +2152,6 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
           onRotate={handleRotate}
           onDownload={handleDownload}
         />
-
-        {/* Top Search Bar Drawer (Find in Document) */}
-        {searchOpen && (
-          <View
-            style={[
-              styles.topSearchDrawer,
-              isLight && styles.topSearchDrawerLight,
-            ]}
-          >
-            <View
-              style={[
-                styles.searchInnerRow,
-                isLight && styles.searchInnerRowLight,
-              ]}
-            >
-              <Ionicons
-                name="search"
-                size={17}
-                color={isLight ? "#2563eb" : "#7bd0ff"}
-                style={{ marginRight: 6 }}
-              />
-              <TextInput
-                style={[
-                  styles.searchDrawerInputField,
-                  isLight && styles.searchDrawerInputFieldLight,
-                ]}
-                placeholder="Find in document..."
-                placeholderTextColor={isLight ? "#64748b" : "#908fa0"}
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-                onSubmitEditing={handleExecuteSearch}
-                returnKeyType="search"
-                autoFocus
-              />
-              {isSearching && (
-                <ActivityIndicator
-                  size="small"
-                  color={isLight ? "#2563eb" : "#7bd0ff"}
-                  style={{ marginHorizontal: 6 }}
-                />
-              )}
-              {searchResults.length > 0 && (
-                <View
-                  style={[
-                    styles.searchMatchCounter,
-                    isLight && styles.searchMatchCounterLight,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.searchMatchText,
-                      isLight && styles.searchMatchTextLight,
-                    ]}
-                  >
-                    {searchIndex + 1}/{searchResults.length}
-                  </Text>
-                  <TouchableOpacity
-                    onPress={handlePrevSearchMatch}
-                    style={styles.searchChevronBtn}
-                    accessibilityLabel="Previous match"
-                  >
-                    <Ionicons
-                      name="chevron-up"
-                      size={16}
-                      color={isLight ? "#0f172a" : "#dae2fd"}
-                    />
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    onPress={handleNextSearchMatch}
-                    style={styles.searchChevronBtn}
-                    accessibilityLabel="Next match"
-                  >
-                    <Ionicons
-                      name="chevron-down"
-                      size={16}
-                      color={isLight ? "#0f172a" : "#dae2fd"}
-                    />
-                  </TouchableOpacity>
-                </View>
-              )}
-              {searchQuery.trim().length > 0 && (
-                <TouchableOpacity
-                  onPress={handleExecuteSearch}
-                  style={[
-                    styles.searchExecuteBtn,
-                    isLight && styles.searchExecuteBtnLight,
-                  ]}
-                  activeOpacity={0.8}
-                >
-                  <Text
-                    style={[
-                      styles.searchExecuteBtnText,
-                      isLight && styles.searchExecuteBtnTextLight,
-                    ]}
-                  >
-                    Find
-                  </Text>
-                </TouchableOpacity>
-              )}
-              <TouchableOpacity
-                onPress={() => {
-                  setSearchOpen(false);
-                  setSearchQuery("");
-                  setSearchResults([]);
-                }}
-                style={styles.searchDrawerCloseBtn}
-                accessibilityLabel="Close search"
-              >
-                <Ionicons
-                  name="close"
-                  size={18}
-                  color={isLight ? "#64748b" : "#908fa0"}
-                />
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
 
         {/* Top Thumbnails Carousel Strip */}
         {showThumbnails && !isLoading && !loadError && (
@@ -2274,61 +2219,206 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
         )}
       </Animated.View>
 
-      {/* Docked Bottom Bar: Absolutely positioned overlay (ZERO layout shift / zero blinks on toggle) */}
-      <Animated.View
-        style={[
-          styles.absoluteBottomBarWrapper,
-          {
-            opacity: barsAnim,
-            transform: [
-              {
-                translateY: barsAnim.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [90, 0],
-                }),
-              },
-            ],
-          },
-        ]}
-        pointerEvents={showBars ? "auto" : "none"}
-      >
-        <View style={styles.dockedBottomBar}>
-          <View style={styles.bottomBarInner}>
-            <TouchableOpacity
-              style={styles.viewModeBottomInner}
-              onPress={() => setShowViewModeModal(true)}
-              activeOpacity={0.7}
-              accessibilityLabel="View Mode"
-              accessibilityRole="button"
+      {/* Search Bottom Bar: Dedicated controls for finding next instance, back, and cancel search */}
+      {searchOpen && (
+        <View
+          style={[
+            styles.bottomSearchContainer,
+            isLight && styles.bottomSearchContainerLight,
+          ]}
+        >
+          {/* Cancel button */}
+          <TouchableOpacity
+            onPress={handleCancelSearch}
+            style={[
+              styles.bottomSearchCancelBtn,
+              isLight && styles.bottomSearchCancelBtnLight,
+            ]}
+            accessibilityLabel="Cancel search"
+            activeOpacity={0.7}
+          >
+            <Text
+              style={[
+                styles.bottomSearchCancelText,
+                isLight && styles.bottomSearchCancelTextLight,
+              ]}
             >
-              <MaterialIcons name="book" size={23} color="#fff" />
-              <Text style={styles.viewModeBtnTitle}>View Mode</Text>
+              Cancel
+            </Text>
+          </TouchableOpacity>
+
+          {/* Match status counter */}
+          <View style={styles.bottomSearchStatusWrapper}>
+            {isSearching ? (
+              <View style={styles.bottomSearchLoadingRow}>
+                <ActivityIndicator
+                  size="small"
+                  color={isLight ? "#2563eb" : "#7bd0ff"}
+                  style={{ marginRight: 6 }}
+                />
+                <Text
+                  style={[
+                    styles.bottomSearchStatusText,
+                    isLight && styles.bottomSearchStatusTextLight,
+                  ]}
+                >
+                  Searching...
+                </Text>
+              </View>
+            ) : searchResults.length > 0 ? (
+              <View style={styles.bottomSearchCountCol}>
+                <Text
+                  style={[
+                    styles.bottomSearchCountText,
+                    isLight && styles.bottomSearchCountTextLight,
+                  ]}
+                >
+                  {searchIndex + 1} of {searchResults.length}
+                </Text>
+                <Text
+                  style={[
+                    styles.bottomSearchPageSubtext,
+                    isLight && styles.bottomSearchPageSubtextLight,
+                  ]}
+                >
+                  Page {searchResults[searchIndex]?.page || currentPage}
+                </Text>
+              </View>
+            ) : searchQuery.trim().length > 0 ? (
+              <Text
+                style={[
+                  styles.bottomSearchStatusText,
+                  isLight && styles.bottomSearchStatusTextLight,
+                ]}
+              >
+                0 of 0 matches
+              </Text>
+            ) : (
+              <Text
+                style={[
+                  styles.bottomSearchStatusText,
+                  isLight && styles.bottomSearchStatusTextLight,
+                ]}
+              >
+                Type to find
+              </Text>
+            )}
+          </View>
+
+          {/* Navigation buttons: finding previous instance (back) or next instance */}
+          <View style={styles.bottomSearchNavButtons}>
+            <TouchableOpacity
+              onPress={handlePrevSearchMatch}
+              disabled={searchResults.length === 0}
+              style={[
+                styles.bottomSearchNavBtn,
+                isLight && styles.bottomSearchNavBtnLight,
+                searchResults.length === 0 && styles.bottomSearchNavBtnDisabled,
+              ]}
+              accessibilityLabel="Previous instance"
+              activeOpacity={0.7}
+            >
+              <Ionicons
+                name="chevron-up"
+                size={22}
+                color={
+                  searchResults.length === 0
+                    ? isLight
+                      ? "#cbd5e1"
+                      : "#475569"
+                    : isLight
+                      ? "#0f172a"
+                      : "#dae2fd"
+                }
+              />
             </TouchableOpacity>
+
             <TouchableOpacity
-              style={styles.viewModeBottomInner}
-              onPress={() => {
-                onShowToast("Edit & annotation tools enabled");
-              }}
+              onPress={handleNextSearchMatch}
+              disabled={searchResults.length === 0}
+              style={[
+                styles.bottomSearchNavBtn,
+                isLight && styles.bottomSearchNavBtnLight,
+                searchResults.length === 0 && styles.bottomSearchNavBtnDisabled,
+              ]}
+              accessibilityLabel="Next instance"
               activeOpacity={0.7}
-              accessibilityLabel="Edit"
-              accessibilityRole="button"
             >
-              <MaterialIcons name="edit" size={23} color="#fff" />
-              <Text style={styles.viewModeBtnTitle}>Edit</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.viewModeBottomInner}
-              onPress={() => setShowViewModeModal(true)}
-              activeOpacity={0.7}
-              accessibilityLabel="Settings"
-              accessibilityRole="button"
-            >
-              <MaterialIcons name="settings" size={23} color="#fff" />
-              <Text style={styles.viewModeBtnTitle}>Settings</Text>
+              <Ionicons
+                name="chevron-down"
+                size={22}
+                color={
+                  searchResults.length === 0
+                    ? isLight
+                      ? "#cbd5e1"
+                      : "#475569"
+                    : isLight
+                      ? "#0f172a"
+                      : "#dae2fd"
+                }
+              />
             </TouchableOpacity>
           </View>
         </View>
-      </Animated.View>
+      )}
+
+      {/* Docked Bottom Bar: When not in search mode */}
+      {!searchOpen && (
+        <Animated.View
+          style={[
+            styles.absoluteBottomBarWrapper,
+            {
+              opacity: barsAnim,
+              transform: [
+                {
+                  translateY: barsAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [90, 0],
+                  }),
+                },
+              ],
+            },
+          ]}
+          pointerEvents={showBars ? "auto" : "none"}
+        >
+          <View style={styles.dockedBottomBar}>
+            <View style={styles.bottomBarInner}>
+              <TouchableOpacity
+                style={styles.viewModeBottomInner}
+                onPress={() => setShowViewModeModal(true)}
+                activeOpacity={0.7}
+                accessibilityLabel="View Mode"
+                accessibilityRole="button"
+              >
+                <MaterialIcons name="book" size={23} color="#fff" />
+                <Text style={styles.viewModeBtnTitle}>View Mode</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.viewModeBottomInner}
+                onPress={() => {
+                  onShowToast("Edit & annotation tools enabled");
+                }}
+                activeOpacity={0.7}
+                accessibilityLabel="Edit"
+                accessibilityRole="button"
+              >
+                <MaterialIcons name="edit" size={23} color="#fff" />
+                <Text style={styles.viewModeBtnTitle}>Edit</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.viewModeBottomInner}
+                onPress={() => setShowViewModeModal(true)}
+                activeOpacity={0.7}
+                accessibilityLabel="Settings"
+                accessibilityRole="button"
+              >
+                <MaterialIcons name="settings" size={23} color="#fff" />
+                <Text style={styles.viewModeBtnTitle}>Settings</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Animated.View>
+      )}
 
       {/* Top Left Page Pill: Appears at top-left corner ONLY when user interacts with the page, auto-fades out */}
       <Animated.View
@@ -3557,5 +3647,101 @@ const styles = StyleSheet.create({
   },
   searchExecuteBtnTextLight: {
     color: "#ffffff",
+  },
+  bottomSearchContainer: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 60,
+    backgroundColor: "#131b2e",
+    borderTopWidth: 1,
+    borderTopColor: "#232f48",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    zIndex: 90,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: -3 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    elevation: 16,
+  },
+  bottomSearchContainerLight: {
+    backgroundColor: "#ffffff",
+    borderTopColor: "#e2e8f0",
+    shadowOpacity: 0.08,
+  },
+  bottomSearchCancelBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  bottomSearchCancelBtnLight: {},
+  bottomSearchCancelText: {
+    color: "#ff7170",
+    fontSize: 15,
+    fontWeight: "600",
+  },
+  bottomSearchCancelTextLight: {
+    color: "#dc2626",
+  },
+  bottomSearchStatusWrapper: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 8,
+  },
+  bottomSearchLoadingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  bottomSearchStatusText: {
+    color: "#908fa0",
+    fontSize: 13,
+    fontWeight: "500",
+  },
+  bottomSearchStatusTextLight: {
+    color: "#64748b",
+  },
+  bottomSearchCountCol: {
+    alignItems: "center",
+  },
+  bottomSearchCountText: {
+    color: "#7bd0ff",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  bottomSearchCountTextLight: {
+    color: "#2563eb",
+  },
+  bottomSearchPageSubtext: {
+    color: "#908fa0",
+    fontSize: 10,
+    fontWeight: "500",
+  },
+  bottomSearchPageSubtextLight: {
+    color: "#64748b",
+  },
+  bottomSearchNavButtons: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  bottomSearchNavBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "#1e293b",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  bottomSearchNavBtnLight: {
+    backgroundColor: "#f1f5f9",
+  },
+  bottomSearchNavBtnDisabled: {
+    opacity: 0.3,
   },
 });
