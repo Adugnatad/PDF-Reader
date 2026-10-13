@@ -531,17 +531,6 @@ class PdfStoreService {
       this.nativeUriMap.get(docIdOrTitle.toLowerCase());
     if (nativeUri) {
       const storedName = docIdOrTitle.split("/").pop() || docIdOrTitle;
-      if (Platform.OS !== "web") {
-        // Native mobile streams directly from disk via nativeUri!
-        // Never load large files into JS memory as Base64 to prevent Android 256MB heap crash
-        return {
-          data: new Uint8Array(0),
-          name: storedName,
-          id: docIdOrTitle,
-          nativeUri,
-        };
-      }
-
       const bytes = await readNativePdfBytes(nativeUri);
       if (bytes && !isBufferDetached(bytes)) {
         const safeBytes = cloneBufferSafe(bytes);

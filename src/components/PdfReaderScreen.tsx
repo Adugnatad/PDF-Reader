@@ -28,7 +28,7 @@ import { ReaderTheme } from "../types";
 import { pdfStore } from "../services/pdfStore";
 import { pdfjsLib } from "../services/pdfService";
 import { ViewModeModal } from "./ViewModeModal";
-import { pickPdfFromDevice } from "../services/nativeFilePicker";
+import { pickPdfFromDevice, readNativePdfBytes } from "../services/nativeFilePicker";
 import Pdf from "react-native-pdf";
 import { fastUint8ToBase64 } from "../utils/fastBase64";
 import {
@@ -437,17 +437,38 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
           }
         }
 
-        if (!currentBytes || !currentItem) {
+        if (!currentBytes || !currentItem || currentBytes.byteLength === 0) {
           try {
             const item = await pdfStore.getPdfData(activeId);
             if (isCancelled) return;
             currentItem = item as any;
-            currentBytes = item.data;
-            setPdfBytes(item.data);
+            if (item.data && item.data.byteLength > 0) {
+              currentBytes = item.data;
+              setPdfBytes(item.data);
+            }
             setActiveTitle(item.name);
             currentUri = item.nativeUri || currentUri;
           } catch (e) {
             console.warn("Could not load pdf data bytes for search indexing:", e);
+          }
+        }
+
+        // On native mobile: if currentBytes is still empty, read directly from any available URI
+        const uriToRead =
+          currentUri ||
+          nativePdfUri ||
+          pdfStore.getNativeUri(activeId) ||
+          pdfStore.getNativeUri(docTitle);
+        if ((!currentBytes || currentBytes.byteLength === 0) && uriToRead) {
+          try {
+            const buf = await readNativePdfBytes(uriToRead);
+            if (buf && buf.byteLength > 0) {
+              currentBytes = new Uint8Array(buf);
+              setPdfBytes(currentBytes);
+              if (!currentUri) currentUri = uriToRead;
+            }
+          } catch (e) {
+            console.warn("Could not read native PDF bytes for search indexing:", e);
           }
         }
 
@@ -925,6 +946,23 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
           }
         } catch {}
       }
+      if (!bytes || bytes.byteLength === 0) {
+        const uriToRead =
+          nativePdfUri ||
+          pdfStore.getNativeUri(activeId) ||
+          pdfStore.getNativeUri(docTitle);
+        if (uriToRead) {
+          try {
+            const buf = await readNativePdfBytes(uriToRead);
+            if (buf && buf.byteLength > 0) {
+              bytes = new Uint8Array(buf);
+              setPdfBytes(bytes);
+            }
+          } catch (e) {
+            console.warn("Could not read native PDF bytes on search:", e);
+          }
+        }
+      }
       if (bytes && bytes.byteLength > 0) {
         try {
           const loadingTask = pdfjsLib.getDocument({
@@ -941,7 +979,8 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
       }
     }
 
-    if (!activeDoc || !searchQuery.trim()) {
+    const rawQ = searchQuery.trim();
+    if (!activeDoc || !rawQ) {
       setSearchResults([]);
       setSearchIndex(0);
       setIsSearching(false);
@@ -949,7 +988,14 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
     }
 
     setIsSearching(true);
-    const q = searchQuery.toLowerCase().trim();
+    // Normalize quotes, dashes, and extra whitespace for flexible matching
+    const q = rawQ
+      .toLowerCase()
+      .replace(/[\u2018\u2019]/g, "'")
+      .replace(/[\u201C\u201D]/g, '"')
+      .replace(/[\u2013\u2014]/g, "-")
+      .replace(/\s+/g, " ");
+
     const matches: SearchMatch[] = [];
 
     try {
@@ -960,22 +1006,32 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
         const content = await page.getTextContent();
         let matchesOnThisPage = 0;
 
+        // 1. Precise single-item searches
+        const matchedItemIndices = new Set<number>();
+
         for (let itemIdx = 0; itemIdx < content.items.length; itemIdx++) {
           const item: any = content.items[itemIdx];
           if (!item || typeof item.str !== "string" || !item.str.trim()) continue;
 
           const itemStr = item.str;
-          const itemLower = itemStr.toLowerCase();
-          let fromIdx = 0;
+          const itemLower = itemStr
+            .toLowerCase()
+            .replace(/[\u2018\u2019]/g, "'")
+            .replace(/[\u201C\u201D]/g, '"')
+            .replace(/[\u2013\u2014]/g, "-")
+            .replace(/\s+/g, " ");
 
+          let fromIdx = 0;
           while (fromIdx < itemLower.length) {
             const foundIdx = itemLower.indexOf(q, fromIdx);
             if (foundIdx === -1) break;
 
-            let left = 0;
-            let top = 0;
-            let width = 0;
-            let height = 0;
+            matchedItemIndices.add(itemIdx);
+
+            let left = 40;
+            let top = 100;
+            let width = 50;
+            let height = 14;
 
             if (
               item.transform &&
@@ -1055,34 +1111,136 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
           }
         }
 
-        // Check full page joined text as fallback if broken across items
-        if (matchesOnThisPage === 0) {
-          const fullPageText = content.items
-            .map((i: any) => i.str || "")
-            .join(" ");
-          const fullLower = fullPageText.toLowerCase();
-          const matchIdx = fullLower.indexOf(q);
-          if (matchIdx !== -1) {
-            const start = Math.max(0, matchIdx - 25);
-            const end = Math.min(fullPageText.length, matchIdx + q.length + 35);
-            const snippet = `...${fullPageText.substring(start, end).trim()}...`;
-            const lineProgress = Math.max(
-              0.1,
-              Math.min(0.9, matchIdx / Math.max(1, fullPageText.length)),
-            );
+        // 2. Cross-item and multi-word searches (e.g. phrases spanning words or items)
+        const itemCharSpans: Array<{
+          idx: number;
+          start: number;
+          end: number;
+          str: string;
+          item: any;
+        }> = [];
+        let fullPageText = "";
+
+        for (let i = 0; i < content.items.length; i++) {
+          const item: any = content.items[i];
+          const str = (item && typeof item.str === "string" ? item.str : "").trim();
+          if (!str) continue;
+          const start = fullPageText.length;
+          fullPageText += (fullPageText ? " " : "") + str;
+          const end = fullPageText.length;
+          itemCharSpans.push({ idx: i, start, end, str, item });
+        }
+
+        const fullLower = fullPageText
+          .toLowerCase()
+          .replace(/[\u2018\u2019]/g, "'")
+          .replace(/[\u201C\u201D]/g, '"')
+          .replace(/[\u2013\u2014]/g, "-")
+          .replace(/\s+/g, " ");
+
+        let pIdx = 0;
+        while (pIdx < fullLower.length) {
+          const matchIdx = fullLower.indexOf(q, pIdx);
+          if (matchIdx === -1) break;
+
+          const matchEnd = matchIdx + q.length;
+
+          // Check if this match was already found by an individual single-item match
+          const coveringItems = itemCharSpans.filter(
+            (sp) => sp.start <= matchEnd && sp.end >= matchIdx,
+          );
+
+          const alreadyHandled =
+            coveringItems.length === 1 &&
+            matchedItemIndices.has(coveringItems[0].idx);
+
+          if (!alreadyHandled && coveringItems.length > 0) {
+            // Compute combined bounding box for all covering items
+            let minBoxX = 100;
+            let minBoxY = 100;
+            let maxBoxX = 0;
+            let maxBoxY = 0;
+            let hasTransform = false;
+
+            for (const sp of coveringItems) {
+              const item = sp.item;
+              if (
+                item.transform &&
+                Array.isArray(item.transform) &&
+                item.transform.length >= 6
+              ) {
+                hasTransform = true;
+                const tx = item.transform[4];
+                const ty = item.transform[5];
+                const itemW = item.width || Math.max(12, sp.str.length * 7);
+                const itemH =
+                  item.height ||
+                  Math.abs(item.transform[3]) ||
+                  Math.abs(item.transform[0]) ||
+                  12;
+
+                if (typeof viewport.convertToViewportRectangle === "function") {
+                  const rect = viewport.convertToViewportRectangle([
+                    tx,
+                    ty,
+                    tx + itemW,
+                    ty + itemH,
+                  ]);
+                  const x1 = Math.min(rect[0], rect[2]);
+                  const y1 = Math.min(rect[1], rect[3]);
+                  const x2 = Math.max(rect[0], rect[2]);
+                  const y2 = Math.max(rect[1], rect[3]);
+
+                  minBoxX = Math.min(minBoxX, (x1 / viewport.width) * 100);
+                  minBoxY = Math.min(minBoxY, (y1 / viewport.height) * 100);
+                  maxBoxX = Math.max(maxBoxX, (x2 / viewport.width) * 100);
+                  maxBoxY = Math.max(maxBoxY, (y2 / viewport.height) * 100);
+                } else {
+                  const x1 = (tx / viewport.width) * 100;
+                  const y1 = ((viewport.height - ty - itemH) / viewport.height) * 100;
+                  const x2 = ((tx + itemW) / viewport.width) * 100;
+                  const y2 = ((viewport.height - ty) / viewport.height) * 100;
+
+                  minBoxX = Math.min(minBoxX, x1);
+                  minBoxY = Math.min(minBoxY, y1);
+                  maxBoxX = Math.max(maxBoxX, x2);
+                  maxBoxY = Math.max(maxBoxY, y2);
+                }
+              }
+            }
+
+            let boxLeft = 10;
+            let boxTop = (matchIdx / Math.max(1, fullLower.length)) * 85;
+            let boxWidth = 80;
+            let boxHeight = 3.5;
+
+            if (hasTransform && maxBoxX > minBoxX && maxBoxY > minBoxY) {
+              boxLeft = Math.max(0, Math.min(98, minBoxX));
+              boxTop = Math.max(0, Math.min(98, minBoxY));
+              boxWidth = Math.max(2, Math.min(100 - boxLeft, maxBoxX - minBoxX));
+              boxHeight = Math.max(1.8, Math.min(100 - boxTop, maxBoxY - minBoxY));
+            }
+
+            const snippetStart = Math.max(0, matchIdx - 25);
+            const snippetEnd = Math.min(fullPageText.length, matchEnd + 35);
+            const snippet = `...${fullPageText.substring(snippetStart, snippetEnd).trim()}...`;
+
             matches.push({
               page: p,
               snippet,
               box: {
-                id: `p${p}-m${matches.length}-approx`,
+                id: `p${p}-m${matches.length}-span-${matchIdx}`,
                 page: p,
-                left: 10,
-                top: lineProgress * 85,
-                width: 80,
-                height: 3.5,
+                left: boxLeft,
+                top: boxTop,
+                width: boxWidth,
+                height: boxHeight,
               },
             });
+            matchesOnThisPage++;
           }
+
+          pIdx = matchIdx + Math.max(1, q.length);
         }
       }
 
