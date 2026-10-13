@@ -43,6 +43,7 @@ import {
   loadViewModeSettings,
 } from "../services/storageHelper";
 import { pdfThumbnailService } from "../services/pdfThumbnailService";
+import { PdfSideScrubber } from "./PdfSideScrubber";
 
 interface PdfReaderScreenProps {
   onBack: () => void;
@@ -498,16 +499,15 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
     };
   }, [activeId]);
 
-  // 2. Generate Thumbnails Lazily (ONLY when user actually opens thumbnail panel)
+  // 2. Generate Thumbnails in background for sidebar scrubber & thumbnail strip
   useEffect(() => {
-    if (!pdfDoc || numPages === 0 || !showThumbnails) return;
+    if (!pdfDoc || numPages === 0) return;
 
     let isMounted = true;
 
     async function generateAllThumbnails() {
       const generated: Record<number, string> = {};
-      // Generate up to 20 thumbnails
-      const maxThumbPages = Math.min(numPages, 20);
+      const maxThumbPages = Math.min(numPages, 30);
       for (let i = 1; i <= maxThumbPages; i++) {
         try {
           if (Platform.OS === "web" && typeof document !== "undefined") {
@@ -527,6 +527,9 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
               if (i === 1 && docId && generated[1]) {
                 pdfThumbnailService.saveThumbnail(docId, generated[1]);
               }
+              if (i === 1 || i % 3 === 0) {
+                setThumbnails((prev) => ({ ...prev, ...generated }));
+              }
             }
           }
         } catch {
@@ -534,7 +537,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
         }
       }
       if (isMounted) {
-        setThumbnails(generated);
+        setThumbnails((prev) => ({ ...prev, ...generated }));
       }
     }
 
@@ -543,7 +546,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [pdfDoc, numPages, rotation, showThumbnails]);
+  }, [pdfDoc, numPages, rotation]);
 
   // 3. Extract Text Content when Reflow mode is active or page changes
   useEffect(() => {
@@ -738,6 +741,22 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
     setShowPagePicker(false);
     onShowToast(`Jumped to Page ${target}`);
   };
+
+  const handleSideScrubberPageChange = useCallback(
+    (pageNum: number) => {
+      const target = Math.max(1, Math.min(numPages, pageNum));
+      setCurrentPage((prev) => (prev !== target ? target : prev));
+      canvasRef.current?.setPage?.(target);
+      if (viewMode === "continuous" && Platform.OS === "web") {
+        const el = continuousCanvases.current.get(target);
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+      }
+      triggerPageInteraction();
+    },
+    [numPages, viewMode, triggerPageInteraction]
+  );
 
   // Sync current page smoothly when viewMode switches between single and continuous
   useEffect(() => {
@@ -1318,6 +1337,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                     <Pdf
                       ref={canvasRef as any}
                       source={pdfSource}
+                      page={currentPage}
                       scale={Platform.OS === "web" ? zoom : nativeScale}
                       {...({ rotation } as any)}
                       minScale={0.5}
@@ -1936,6 +1956,35 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
           </Text>
         </TouchableOpacity>
       </Animated.View>
+
+      {/* Draggable Scrubber Bar with Real-Time Page Number Bubble on Side for Native Devices */}
+      <PdfSideScrubber
+        currentPage={currentPage}
+        numPages={numPages}
+        onPageChange={handleSideScrubberPageChange}
+        topOffset={
+          showBars
+            ? Platform.OS === "ios"
+              ? 98
+              : 82
+            : Platform.OS === "ios"
+              ? 42
+              : 26
+        }
+        bottomOffset={
+          showBars
+            ? Platform.OS === "ios"
+              ? 98
+              : 82
+            : Platform.OS === "ios"
+              ? 42
+              : 26
+        }
+        theme={theme}
+        thumbnails={thumbnails}
+        visible={!isLoading && !loadError && numPages > 1}
+        docTitle={activeTitle}
+      />
 
       {/* View Mode Modal Component */}
       <ViewModeModal

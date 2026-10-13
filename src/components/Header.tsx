@@ -5,6 +5,8 @@ import {
   TouchableOpacity,
   StyleSheet,
   Platform,
+  TextInput,
+  ActivityIndicator,
 } from "react-native";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 
@@ -34,6 +36,13 @@ export interface HeaderProps {
   onOpenViewMode?: () => void;
   onRotate?: () => void;
   onDownload?: () => void;
+  // Dedicated Search Header controls:
+  searchQuery?: string;
+  onSearchQueryChange?: (q: string) => void;
+  onSearchSubmit?: () => void;
+  onClearSearch?: () => void;
+  onCloseSearch?: () => void;
+  isSearching?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -60,10 +69,89 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenViewMode,
   onRotate,
   onDownload,
+  searchQuery = "",
+  onSearchQueryChange,
+  onSearchSubmit,
+  onClearSearch,
+  onCloseSearch,
+  isSearching = false,
 }) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const isLight = theme === "light";
   const isNight = theme === "night";
+
+  if (searchOpen) {
+    return (
+      <View
+        style={[styles.headerContainer, isLight && styles.headerContainerLight]}
+      >
+        <View style={styles.searchHeaderRow}>
+          {/* Back button to dismiss / exit search */}
+          <TouchableOpacity
+            accessibilityLabel="Close search"
+            onPress={onCloseSearch || onToggleSearch}
+            style={[styles.iconButton, isLight && styles.iconButtonLight]}
+            activeOpacity={0.7}
+          >
+            <Ionicons
+              name="arrow-back"
+              size={20}
+              color={isLight ? "#334155" : "#c7c4d7"}
+            />
+          </TouchableOpacity>
+
+          {/* Search Input Box */}
+          <View
+            style={[
+              styles.headerSearchInputWrapper,
+              isLight && styles.headerSearchInputWrapperLight,
+            ]}
+          >
+            <Ionicons
+              name="search"
+              size={18}
+              color={isLight ? "#2563eb" : "#7bd0ff"}
+              style={{ marginRight: 8 }}
+            />
+            <TextInput
+              style={[
+                styles.headerSearchInputField,
+                isLight && styles.headerSearchInputFieldLight,
+              ]}
+              placeholder="Find in document..."
+              placeholderTextColor={isLight ? "#64748b" : "#908fa0"}
+              value={searchQuery}
+              onChangeText={onSearchQueryChange}
+              onSubmitEditing={onSearchSubmit}
+              returnKeyType="search"
+              autoFocus
+            />
+            {isSearching && (
+              <ActivityIndicator
+                size="small"
+                color={isLight ? "#2563eb" : "#7bd0ff"}
+                style={{ marginHorizontal: 4 }}
+              />
+            )}
+            {searchQuery && searchQuery.trim().length > 0 ? (
+              <TouchableOpacity
+                onPress={onClearSearch}
+                accessibilityLabel="Clear search text"
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                style={styles.headerSearchClearBtn}
+              >
+                <Ionicons
+                  name="close-circle"
+                  size={18}
+                  color={isLight ? "#64748b" : "#908fa0"}
+                />
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View
@@ -116,7 +204,40 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Right Section: Top Options Toolbar */}
         <View style={styles.rightGroup}>
-          {/* 1. Button for rotating the screen horizontal */}
+          {/* 1. Button for searching in PDF document */}
+          {onToggleSearch && (
+            <TouchableOpacity
+              accessibilityLabel={
+                searchOpen ? "Close search" : "Search in document"
+              }
+              onPress={onToggleSearch}
+              style={[
+                styles.iconButton,
+                isLight && styles.iconButtonLight,
+                searchOpen &&
+                  (isLight
+                    ? styles.iconButtonLightActive
+                    : styles.iconButtonActive),
+              ]}
+              activeOpacity={0.7}
+            >
+              <Ionicons
+                name={searchOpen ? "search" : "search-outline"}
+                size={20}
+                color={
+                  searchOpen
+                    ? isLight
+                      ? "#2563eb"
+                      : "#7bd0ff"
+                    : isLight
+                      ? "#000"
+                      : "#c7c4d7"
+                }
+              />
+            </TouchableOpacity>
+          )}
+
+          {/* 2. Button for rotating the screen horizontal */}
           {onRotateHorizontal && (
             <TouchableOpacity
               accessibilityLabel={
@@ -471,8 +592,18 @@ const styles = StyleSheet.create({
     // borderColor: "rgba(45, 52, 73, 0.5)",
   },
   iconButtonLight: {},
-  iconButtonActive: {},
-  iconButtonDarkActive: {},
+  iconButtonActive: {
+    backgroundColor: "rgba(123, 208, 255, 0.16)",
+    borderRadius: 8,
+  },
+  iconButtonLightActive: {
+    backgroundColor: "rgba(37, 99, 235, 0.12)",
+    borderRadius: 8,
+  },
+  iconButtonDarkActive: {
+    backgroundColor: "rgba(218, 226, 253, 0.16)",
+    borderRadius: 8,
+  },
   titleText: {
     fontSize: 15,
     fontWeight: "600",
@@ -544,5 +675,41 @@ const styles = StyleSheet.create({
   },
   dropdownTextLight: {
     color: "#0f172a",
+  },
+  searchHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    width: "100%",
+    paddingHorizontal: 8,
+    gap: 8,
+  },
+  headerSearchInputWrapper: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#171f33",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#2d3449",
+    paddingHorizontal: 10,
+    height: 38,
+  },
+  headerSearchInputWrapperLight: {
+    backgroundColor: "#f1f5f9",
+    borderColor: "#cbd5e1",
+  },
+  headerSearchInputField: {
+    flex: 1,
+    color: "#dae2fd",
+    fontSize: 14,
+    paddingVertical: 2,
+    outlineStyle: "none" as any,
+  },
+  headerSearchInputFieldLight: {
+    color: "#0f172a",
+  },
+  headerSearchClearBtn: {
+    padding: 2,
+    marginLeft: 4,
   },
 });
