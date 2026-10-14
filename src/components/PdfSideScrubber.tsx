@@ -4,7 +4,7 @@ import React, {
   useEffect,
   useCallback,
   useMemo,
-} from 'react';
+} from "react";
 import {
   View,
   Text,
@@ -12,8 +12,8 @@ import {
   PanResponder,
   Animated,
   Platform,
-} from 'react-native';
-import { ReaderTheme } from '../types';
+} from "react-native";
+import { ReaderTheme } from "../types";
 
 interface PdfSideScrubberProps {
   currentPage: number;
@@ -39,7 +39,7 @@ export const PdfSideScrubber: React.FC<PdfSideScrubberProps> = ({
   onPageChange,
   topOffset = 74,
   bottomOffset = 84,
-  theme = 'light',
+  theme = "light",
   visible = true,
 }) => {
   const [trackHeight, setTrackHeight] = useState<number>(0);
@@ -74,14 +74,17 @@ export const PdfSideScrubber: React.FC<PdfSideScrubberProps> = ({
   useEffect(() => {
     if (isDraggingRef.current || trackHeight <= 0 || numPages <= 1) return;
 
-    const progress = Math.max(0, Math.min(1, (currentPage - 1) / (numPages - 1)));
+    const progress = Math.max(
+      0,
+      Math.min(1, (currentPage - 1) / (numPages - 1)),
+    );
     const targetY = progress * availableTravel;
 
     Animated.spring(thumbY, {
       toValue: targetY,
       tension: 130,
       friction: 14,
-      useNativeDriver: Platform.OS !== 'web',
+      useNativeDriver: Platform.OS !== "web",
     }).start();
 
     setScrubPage(currentPage);
@@ -91,7 +94,7 @@ export const PdfSideScrubber: React.FC<PdfSideScrubberProps> = ({
   const triggerHaptic = useCallback((newPage: number) => {
     if (newPage !== lastHapticPageRef.current) {
       lastHapticPageRef.current = newPage;
-      if (typeof navigator !== 'undefined' && navigator.vibrate) {
+      if (typeof navigator !== "undefined" && navigator.vibrate) {
         try {
           navigator.vibrate(8);
         } catch {
@@ -101,21 +104,24 @@ export const PdfSideScrubber: React.FC<PdfSideScrubberProps> = ({
     }
   }, []);
 
-  const animateActiveState = useCallback((active: boolean) => {
-    Animated.parallel([
-      Animated.spring(widgetScale, {
-        toValue: active ? 1.06 : 1,
-        tension: 200,
-        friction: 12,
-        useNativeDriver: Platform.OS !== 'web',
-      }),
-      Animated.timing(widgetOpacity, {
-        toValue: 1,
-        duration: 100,
-        useNativeDriver: Platform.OS !== 'web',
-      }),
-    ]).start();
-  }, [widgetScale, widgetOpacity]);
+  const animateActiveState = useCallback(
+    (active: boolean) => {
+      Animated.parallel([
+        Animated.spring(widgetScale, {
+          toValue: active ? 1.06 : 1,
+          tension: 200,
+          friction: 12,
+          useNativeDriver: Platform.OS !== "web",
+        }),
+        Animated.timing(widgetOpacity, {
+          toValue: 1,
+          duration: 100,
+          useNativeDriver: Platform.OS !== "web",
+        }),
+      ]).start();
+    },
+    [widgetScale, widgetOpacity],
+  );
 
   // Convert vertical track pixel position to clamped page number
   const calculatePageFromY = useCallback(
@@ -224,7 +230,7 @@ export const PdfSideScrubber: React.FC<PdfSideScrubberProps> = ({
 
   // Web pointer event handlers for desktop mouse and browser touch drag
   const handleWebPointerDown = (e: any) => {
-    if (Platform.OS !== 'web' || numPages <= 1) return;
+    if (Platform.OS !== "web" || numPages <= 1) return;
     try {
       e.currentTarget?.setPointerCapture?.(e.pointerId);
     } catch {
@@ -248,7 +254,8 @@ export const PdfSideScrubber: React.FC<PdfSideScrubberProps> = ({
   };
 
   const handleWebPointerMove = (e: any) => {
-    if (Platform.OS !== 'web' || !isDraggingRef.current || numPages <= 1) return;
+    if (Platform.OS !== "web" || !isDraggingRef.current || numPages <= 1)
+      return;
 
     const rect = e.currentTarget.getBoundingClientRect();
     const touchY = e.clientY - rect.top;
@@ -262,7 +269,7 @@ export const PdfSideScrubber: React.FC<PdfSideScrubberProps> = ({
   };
 
   const handleWebPointerUp = (e: any) => {
-    if (Platform.OS !== 'web' || !isDraggingRef.current) return;
+    if (Platform.OS !== "web" || !isDraggingRef.current) return;
     try {
       e.currentTarget?.releasePointerCapture?.(e.pointerId);
     } catch {
@@ -296,19 +303,19 @@ export const PdfSideScrubber: React.FC<PdfSideScrubberProps> = ({
   // Theme-adaptive colors for the page bubble container
   const themeStyles = {
     light: {
-      pillBg: '#e8ecf4',
-      pillBorder: 'rgba(0, 0, 0, 0.08)',
-      pageTextColor: '#334155',
+      pillBg: "#e8ecf4",
+      pillBorder: "rgba(0, 0, 0, 0.08)",
+      pageTextColor: "#334155",
     },
     sepia: {
-      pillBg: '#ece4d5',
-      pillBorder: 'rgba(70, 50, 30, 0.1)',
-      pageTextColor: '#3c3226',
+      pillBg: "#ece4d5",
+      pillBorder: "rgba(70, 50, 30, 0.1)",
+      pageTextColor: "#3c3226",
     },
     night: {
-      pillBg: '#1e293b',
-      pillBorder: 'rgba(255, 255, 255, 0.12)',
-      pageTextColor: '#f8fafc',
+      pillBg: "#1e293b",
+      pillBorder: "rgba(255, 255, 255, 0.12)",
+      pageTextColor: "#f8fafc",
     },
   }[theme];
 
@@ -334,7 +341,7 @@ export const PdfSideScrubber: React.FC<PdfSideScrubberProps> = ({
           }
         }}
         {...panResponder.panHandlers}
-        {...(Platform.OS === 'web'
+        {...(Platform.OS === "web"
           ? {
               onPointerDown: handleWebPointerDown,
               onPointerMove: handleWebPointerMove,
@@ -348,10 +355,7 @@ export const PdfSideScrubber: React.FC<PdfSideScrubberProps> = ({
           style={[
             styles.scrubberWidget,
             {
-              transform: [
-                { translateY: thumbY },
-                { scale: widgetScale },
-              ],
+              transform: [{ translateY: thumbY }, { scale: widgetScale }],
               opacity: widgetOpacity,
             },
           ]}
@@ -377,14 +381,6 @@ export const PdfSideScrubber: React.FC<PdfSideScrubberProps> = ({
               {scrubPage}
             </Text>
           </View>
-
-          {/* Red Circle Grab Handle with Two Horizontal White Grip Bars */}
-          <View style={styles.redCircleHandle}>
-            <View style={styles.gripBarsContainer}>
-              <View style={styles.gripBar} />
-              <View style={styles.gripBar} />
-            </View>
-          </View>
         </Animated.View>
       </View>
     </View>
@@ -393,41 +389,41 @@ export const PdfSideScrubber: React.FC<PdfSideScrubberProps> = ({
 
 const styles = StyleSheet.create({
   container: {
-    position: 'absolute',
+    position: "absolute",
     right: 0,
     width: WIDGET_WIDTH,
     zIndex: 9999,
   },
   trackWrapper: {
-    position: 'absolute',
+    position: "absolute",
     top: 0,
     bottom: 0,
     right: 0,
     width: WIDGET_WIDTH,
-    justifyContent: 'flex-start',
+    justifyContent: "flex-start",
   },
   scrubberWidget: {
-    position: 'absolute',
+    position: "absolute",
     top: 0,
     right: 0,
     width: WIDGET_WIDTH,
     height: WIDGET_HEIGHT,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   /* Grey bubble that touches the right screen edge */
   pagePillContainer: {
-    position: 'absolute',
+    position: "absolute",
     right: 0,
     width: PILL_WIDTH,
     height: PILL_HEIGHT,
-    borderTopLeftRadius: 18,
-    borderBottomLeftRadius: 18,
+    borderTopLeftRadius: 20,
+    borderBottomLeftRadius: 20,
     borderWidth: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     paddingLeft: 10,
-    shadowColor: '#000000',
+    shadowColor: "#000000",
     shadowOffset: { width: -1, height: 2 },
     shadowOpacity: 0.15,
     shadowRadius: 3,
@@ -435,36 +431,36 @@ const styles = StyleSheet.create({
   },
   pageNumberText: {
     fontSize: 20,
-    fontWeight: '700',
-    fontVariant: ['tabular-nums'],
+    fontWeight: "700",
+    fontVariant: ["tabular-nums"],
     letterSpacing: -0.5,
   },
   /* Red circular drag handle with two horizontal white grip bars */
   redCircleHandle: {
-    position: 'absolute',
+    position: "absolute",
     left: 0,
     top: 0,
     width: CIRCLE_SIZE,
     height: CIRCLE_SIZE,
     borderRadius: CIRCLE_SIZE / 2,
-    backgroundColor: '#dc2626', // Acrobat Crimson Red
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000000',
+    backgroundColor: "#dc2626", // Acrobat Crimson Red
+    justifyContent: "center",
+    alignItems: "center",
+    shadowColor: "#000000",
     shadowOffset: { width: -1, height: 3 },
     shadowOpacity: 0.35,
     shadowRadius: 5,
     elevation: 8,
   },
   gripBarsContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     gap: 4.5,
   },
   gripBar: {
     width: 20,
     height: 3.5,
-    backgroundColor: '#ffffff',
+    backgroundColor: "#ffffff",
     borderRadius: 2,
   },
 });
