@@ -71,18 +71,32 @@ function getInitialLocation(): RouterLocation {
   if (typeof window === 'undefined') {
     return { pathname: '/', params: {} };
   }
+  let initialLoc: RouterLocation = { pathname: '/', params: {} };
+
   if (window.location.hash) {
     const hash = window.location.hash.replace(/^#/, '');
     if (hash) {
-      return parseUrl(hash);
+      initialLoc = parseUrl(hash);
+    }
+  } else {
+    const search = window.location.search;
+    const path = window.location.pathname;
+    if (search || (path && path !== '/')) {
+      initialLoc = parseUrl(`${path}${search}`);
     }
   }
-  const search = window.location.search;
-  const path = window.location.pathname;
-  if (search || (path && path !== '/')) {
-    return parseUrl(`${path}${search}`);
+
+  // Also merge any window.location.search params if hash did not specify them
+  if (window.location.search) {
+    const searchParams = new URLSearchParams(window.location.search);
+    searchParams.forEach((val, key) => {
+      if (!initialLoc.params[key]) {
+        initialLoc.params[key] = val;
+      }
+    });
   }
-  return { pathname: '/', params: {} };
+
+  return initialLoc;
 }
 
 export function ExpoRouterProvider({ children }: { children?: React.ReactNode }) {

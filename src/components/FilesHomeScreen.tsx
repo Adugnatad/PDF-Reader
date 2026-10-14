@@ -21,7 +21,6 @@ import {
   openAllFilesAccessSettings,
 } from "../services/nativeFilePicker";
 import { isUuidOrHash, resolvePdfDisplayName } from "../utils/pdfNameResolver";
-import { PdfThumbnailPreview } from "./PdfThumbnailPreview";
 
 interface FilesHomeScreenProps {
   files: DocFile[];
@@ -631,11 +630,15 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
                     activeOpacity={0.7}
                   >
 
-                    {/* Real PDF Document Page Preview */}
-                    <PdfThumbnailPreview
-                      fileId={file.id}
-                      fileName={displayName}
-                    />
+                    {/* Generic PDF Document Logo */}
+                    <View style={styles.genericPdfLogo}>
+                      <MaterialIcons
+                        name="picture-as-pdf"
+                        size={22}
+                        color="#ff516a"
+                      />
+                      <Text style={styles.genericPdfBadgeText}>PDF</Text>
+                    </View>
 
                     {/* Document Information */}
                     <View style={styles.fileDetails}>
@@ -1062,6 +1065,24 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#263554",
     gap: 10,
+  },
+  genericPdfLogo: {
+    width: 44,
+    height: 48,
+    borderRadius: 8,
+    backgroundColor: "#2a151e",
+    borderWidth: 1,
+    borderColor: "rgba(255, 81, 106, 0.35)",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 3,
+  },
+  genericPdfBadgeText: {
+    fontSize: 8,
+    fontWeight: "800",
+    color: "#ff9aa7",
+    letterSpacing: 0.5,
+    marginTop: 1,
   },
   typeBadge: {
     width: 44,

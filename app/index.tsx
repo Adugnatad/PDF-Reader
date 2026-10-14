@@ -5,7 +5,7 @@ import {
   StyleSheet,
   View,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { FilesHomeScreen } from '../src/components/FilesHomeScreen';
 import { PdfSplashScreen } from '../src/components/PdfSplashScreen';
@@ -16,10 +16,32 @@ import { hasAllFilesAccess } from '../src/services/nativeFilePicker';
 
 export default function IndexScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{
+    title?: string;
+    docId?: string;
+    file?: string;
+    name?: string;
+    doc?: string;
+  }>();
   const { showToast } = useToast();
   const [allFiles, setAllFiles] = useState<DocFile[]>(() => pdfStore.getUserFiles());
   const [isSplashVisible, setIsSplashVisible] = useState(true);
   const fadeAnim = useRef(new Animated.Value(1)).current;
+
+  // Immediately redirect to PDF reader if a specific document is requested in the URL
+  useEffect(() => {
+    const targetTitle = params.title || params.file || params.name || params.doc;
+    const targetId = params.docId;
+    if (targetTitle || targetId) {
+      router.replace({
+        pathname: '/pdf',
+        params: {
+          title: targetTitle || '',
+          docId: targetId || (targetTitle ? targetTitle : ''),
+        },
+      });
+    }
+  }, [params.title, params.docId, params.file, params.name, params.doc]);
 
   // Keep allFiles in sync with store additions / scan discoveries
   useEffect(() => {
