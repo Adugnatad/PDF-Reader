@@ -27,6 +27,7 @@ import {
   getPdfFromIndexedDb,
   deletePdfFromIndexedDb,
 } from './pdfStorageDb';
+import { getPdfLocalUri } from './nativePdfOpener';
 
 interface StoredPdf {
   id: string;
@@ -88,6 +89,21 @@ class PdfStoreService {
       this.seedDefaultFiles();
     }
     this.resolveMissingPageCounts().catch(() => {});
+    if (Platform.OS !== 'web') {
+      this.prewarmSampleFilesNative().catch(() => {});
+    }
+  }
+
+  public async prewarmSampleFilesNative(): Promise<void> {
+    if (Platform.OS === 'web') return;
+    try {
+      const sampleIds = ['sample-tax', 'sample-contract', 'sample-audit'];
+      for (const id of sampleIds) {
+        if (!this.nativeUriMap.has(id)) {
+          await this.getPdfData(id);
+        }
+      }
+    } catch {}
   }
 
   private seedDefaultFiles() {
@@ -456,6 +472,27 @@ class PdfStoreService {
         if (!isBufferDetached(item.data)) return item;
       }
     }
+    // Instant lookup for native devices: if we have a direct disk URI, return a ready-to-stream StoredPdf
+    const nativeUri =
+      this.nativeUriMap.get(docIdOrTitle) ||
+      this.nativeUriMap.get(clean) ||
+      this.nativeUriMap.get(clean.replace(/\.pdf$/i, ''));
+    if (nativeUri) {
+      const userFile = this.userFiles.find(
+        (f) =>
+          f.id === docIdOrTitle ||
+          f.name.toLowerCase() === clean ||
+          f.name.toLowerCase().replace(/\.pdf$/i, '') === clean.replace(/\.pdf$/i, '')
+      );
+      return {
+        id: userFile?.id || docIdOrTitle,
+        name: userFile?.name || docIdOrTitle,
+        data: new Uint8Array(0),
+        uploadedAt: 'Device',
+        nativeUri,
+        pageCount: userFile?.pageCount || 1,
+      };
+    }
     return null;
   }
 
@@ -556,9 +593,20 @@ class PdfStoreService {
     // 4. Check if we have a native URI for this file on device
     const nativeUri =
       this.nativeUriMap.get(docIdOrTitle) ||
-      this.nativeUriMap.get(docIdOrTitle.toLowerCase());
+      this.nativeUriMap.get(docIdOrTitle.toLowerCase()) ||
+      this.nativeUriMap.get(docIdOrTitle.toLowerCase().replace(/\.pdf$/i, ''));
     if (nativeUri) {
       const storedName = docIdOrTitle.split("/").pop() || docIdOrTitle;
+      // On native mobile devices, react-native-pdf streams directly from disk/content URI.
+      // Returning immediately (0ms) makes opening instant!
+      if (Platform.OS !== 'web') {
+        return {
+          data: new Uint8Array(0),
+          name: storedName,
+          id: docIdOrTitle,
+          nativeUri,
+        };
+      }
       const bytes = await readNativePdfBytes(nativeUri);
       if (bytes && !isBufferDetached(bytes)) {
         const safeBytes = cloneBufferSafe(bytes);
@@ -647,12 +695,26 @@ class PdfStoreService {
       }
     }
 
+    let sampleNativeUri: string | undefined;
+    if (Platform.OS !== 'web') {
+      try {
+        sampleNativeUri = await getPdfLocalUri(generatedBytes, finalTitle);
+        this.nativeUriMap.set(docIdOrTitle, sampleNativeUri);
+        this.nativeUriMap.set(finalTitle, sampleNativeUri);
+        this.nativeUriMap.set(docIdOrTitle.toLowerCase(), sampleNativeUri);
+        this.nativeUriMap.set(finalTitle.toLowerCase(), sampleNativeUri);
+      } catch (err) {
+        console.warn('Could not write sample PDF to cache:', err);
+      }
+    }
+
     const stored: StoredPdf = {
       id: docIdOrTitle,
       name: finalTitle,
       data: cloneBufferSafe(generatedBytes),
       uploadedAt: 'Today',
-      nativeUri,
+      pageCount: isSampleTax ? 3 : isSampleContract ? 4 : isSampleAudit ? 5 : (userFile?.pageCount || 6),
+      nativeUri: sampleNativeUri || nativeUri,
     };
     this.pdfCache.set(docIdOrTitle, stored);
     this.pdfCache.set(finalTitle, stored);
@@ -662,7 +724,7 @@ class PdfStoreService {
       data: cloneBufferSafe(stored.data),
       name: stored.name,
       id: stored.id,
-      nativeUri,
+      nativeUri: sampleNativeUri || nativeUri,
     };
   }
 

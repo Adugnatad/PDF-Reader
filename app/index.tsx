@@ -33,11 +33,16 @@ export default function IndexScreen() {
     const targetTitle = params.title || params.file || params.name || params.doc;
     const targetId = params.docId;
     if (targetTitle || targetId) {
+      const resolvedUri =
+        (targetId ? pdfStore.getNativeUri(targetId) : undefined) ||
+        (targetTitle ? pdfStore.getNativeUri(targetTitle) : undefined) ||
+        '';
       router.replace({
         pathname: '/pdf',
         params: {
           title: targetTitle || '',
           docId: targetId || (targetTitle ? targetTitle : ''),
+          uri: resolvedUri,
         },
       });
     }
@@ -144,9 +149,17 @@ export default function IndexScreen() {
         params: { fileName: file.name },
       });
     } else {
+      const nativeUri =
+        pdfStore.getNativeUri(file.id) ||
+        pdfStore.getNativeUri(file.name) ||
+        '';
       router.push({
         pathname: '/pdf',
-        params: { title: file.name, docId: file.id },
+        params: {
+          title: file.name,
+          docId: file.id,
+          uri: nativeUri,
+        },
       });
     }
   };

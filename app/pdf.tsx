@@ -12,6 +12,7 @@ export default function PdfScreen() {
     file?: string;
     name?: string;
     doc?: string;
+    uri?: string;
   }>();
   const { showToast } = useToast();
 
@@ -42,11 +43,18 @@ export default function PdfScreen() {
     docTitle = matched?.name || docId;
   }
 
+  const directUri =
+    params.uri ||
+    pdfStore.getNativeUri(docId) ||
+    pdfStore.getNativeUri(docTitle) ||
+    '';
+
   return (
     <PdfReaderScreen
       key={`${docId}-${docTitle}`}
       docTitle={docTitle}
       docId={docId}
+      initialUri={directUri}
       onBack={() => router.back()}
       onShowToast={showToast}
     />
