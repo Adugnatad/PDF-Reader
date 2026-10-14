@@ -80,79 +80,6 @@ export const Header: React.FC<HeaderProps> = ({
   const isLight = theme === "light";
   const isNight = theme === "night";
 
-  if (searchOpen) {
-    return (
-      <View
-        style={[styles.headerContainer, isLight && styles.headerContainerLight]}
-      >
-        <View style={styles.searchHeaderRow}>
-          {/* Back button to dismiss / exit search */}
-          <TouchableOpacity
-            accessibilityLabel="Close search"
-            onPress={onCloseSearch || onToggleSearch}
-            style={[styles.iconButton, isLight && styles.iconButtonLight]}
-            activeOpacity={0.7}
-          >
-            <Ionicons
-              name="arrow-back"
-              size={20}
-              color={isLight ? "#334155" : "#c7c4d7"}
-            />
-          </TouchableOpacity>
-
-          {/* Search Input Box */}
-          <View
-            style={[
-              styles.headerSearchInputWrapper,
-              isLight && styles.headerSearchInputWrapperLight,
-            ]}
-          >
-            <Ionicons
-              name="search"
-              size={18}
-              color={isLight ? "#2563eb" : "#7bd0ff"}
-              style={{ marginRight: 8 }}
-            />
-            <TextInput
-              style={[
-                styles.headerSearchInputField,
-                isLight && styles.headerSearchInputFieldLight,
-              ]}
-              placeholder="Find in document..."
-              placeholderTextColor={isLight ? "#64748b" : "#908fa0"}
-              value={searchQuery}
-              onChangeText={onSearchQueryChange}
-              onSubmitEditing={onSearchSubmit}
-              returnKeyType="search"
-              autoFocus
-            />
-            {isSearching && (
-              <ActivityIndicator
-                size="small"
-                color={isLight ? "#2563eb" : "#7bd0ff"}
-                style={{ marginHorizontal: 4 }}
-              />
-            )}
-            {searchQuery && searchQuery.trim().length > 0 ? (
-              <TouchableOpacity
-                onPress={onClearSearch}
-                accessibilityLabel="Clear search text"
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                style={styles.headerSearchClearBtn}
-              >
-                <Ionicons
-                  name="close-circle"
-                  size={18}
-                  color={isLight ? "#64748b" : "#908fa0"}
-                />
-              </TouchableOpacity>
-            ) : null}
-          </View>
-        </View>
-      </View>
-    );
-  }
-
   return (
     <View
       style={[styles.headerContainer, isLight && styles.headerContainerLight]}
@@ -204,39 +131,6 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Right Section: Top Options Toolbar */}
         <View style={styles.rightGroup}>
-          {/* 1. Button for searching in PDF document */}
-          {onToggleSearch && (
-            <TouchableOpacity
-              accessibilityLabel={
-                searchOpen ? "Close search" : "Search in document"
-              }
-              onPress={onToggleSearch}
-              style={[
-                styles.iconButton,
-                isLight && styles.iconButtonLight,
-                searchOpen &&
-                  (isLight
-                    ? styles.iconButtonLightActive
-                    : styles.iconButtonActive),
-              ]}
-              activeOpacity={0.7}
-            >
-              <Ionicons
-                name={searchOpen ? "search" : "search-outline"}
-                size={20}
-                color={
-                  searchOpen
-                    ? isLight
-                      ? "#2563eb"
-                      : "#7bd0ff"
-                    : isLight
-                      ? "#000"
-                      : "#c7c4d7"
-                }
-              />
-            </TouchableOpacity>
-          )}
-
           {/* 2. Button for rotating the screen horizontal */}
           {onRotateHorizontal && (
             <TouchableOpacity
@@ -338,56 +232,6 @@ export const Header: React.FC<HeaderProps> = ({
             <View
               style={[styles.dropdownMenu, isLight && styles.dropdownMenuLight]}
             >
-              {onToggleSearch && (
-                <TouchableOpacity
-                  onPress={() => {
-                    setMenuOpen(false);
-                    onToggleSearch();
-                  }}
-                  style={styles.dropdownItem}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons
-                    name="search-outline"
-                    size={16}
-                    color={isLight ? "#2563eb" : "#7bd0ff"}
-                  />
-                  <Text
-                    style={[
-                      styles.dropdownText,
-                      isLight && styles.dropdownTextLight,
-                    ]}
-                  >
-                    {searchOpen ? "Close Search" : "Find in Document"}
-                  </Text>
-                </TouchableOpacity>
-              )}
-
-              {onToggleThumbnails && (
-                <TouchableOpacity
-                  onPress={() => {
-                    setMenuOpen(false);
-                    onToggleThumbnails();
-                  }}
-                  style={styles.dropdownItem}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons
-                    name="grid-outline"
-                    size={16}
-                    color={isLight ? "#2563eb" : "#7bd0ff"}
-                  />
-                  <Text
-                    style={[
-                      styles.dropdownText,
-                      isLight && styles.dropdownTextLight,
-                    ]}
-                  >
-                    {showThumbnails ? "Hide Thumbnails" : "Page Thumbnails"}
-                  </Text>
-                </TouchableOpacity>
-              )}
-
               {onToggleBookmark && (
                 <TouchableOpacity
                   onPress={() => {
@@ -409,31 +253,6 @@ export const Header: React.FC<HeaderProps> = ({
                     ]}
                   >
                     {isBookmarked ? "Remove Bookmark" : "Bookmark Page"}
-                  </Text>
-                </TouchableOpacity>
-              )}
-
-              {onOpenViewMode && (
-                <TouchableOpacity
-                  onPress={() => {
-                    setMenuOpen(false);
-                    onOpenViewMode();
-                  }}
-                  style={styles.dropdownItem}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons
-                    name="options-outline"
-                    size={16}
-                    color={isLight ? "#2563eb" : "#7bd0ff"}
-                  />
-                  <Text
-                    style={[
-                      styles.dropdownText,
-                      isLight && styles.dropdownTextLight,
-                    ]}
-                  >
-                    Reading & Layout Settings
                   </Text>
                 </TouchableOpacity>
               )}
@@ -509,31 +328,6 @@ export const Header: React.FC<HeaderProps> = ({
                     ]}
                   >
                     Open in System Reader
-                  </Text>
-                </TouchableOpacity>
-              )}
-
-              {onOpenFileFromDevice && (
-                <TouchableOpacity
-                  onPress={() => {
-                    setMenuOpen(false);
-                    onOpenFileFromDevice();
-                  }}
-                  style={styles.dropdownItem}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons
-                    name="folder-open-outline"
-                    size={16}
-                    color={isLight ? "#2563eb" : "#7bd0ff"}
-                  />
-                  <Text
-                    style={[
-                      styles.dropdownText,
-                      isLight && styles.dropdownTextLight,
-                    ]}
-                  >
-                    Open Other PDF
                   </Text>
                 </TouchableOpacity>
               )}

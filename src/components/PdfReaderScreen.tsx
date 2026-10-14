@@ -85,26 +85,26 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
   // Instantaneous Document State Initialization from Cache
   const initialActiveId = docId || docTitle;
   const initialCached =
-    pdfStore.getCachedPdf(initialActiveId) ||
-    pdfStore.getCachedPdf(docTitle);
+    pdfStore.getCachedPdf(initialActiveId) || pdfStore.getCachedPdf(docTitle);
 
   const initialNativeUri =
     initialCached?.nativeUri ||
     (initialCached?.data
-      ? getCachedLocalUri(initialCached.name, initialCached.data.byteLength) || ""
+      ? getCachedLocalUri(initialCached.name, initialCached.data.byteLength) ||
+        ""
       : "");
 
   const [activeTitle, setActiveTitle] = useState(
-    initialCached ? initialCached.name : docTitle
+    initialCached ? initialCached.name : docTitle,
   );
   const [activeId, setActiveId] = useState(initialActiveId);
   const [pdfBytes, setPdfBytes] = useState<Uint8Array | ArrayBuffer | null>(
-    initialCached ? initialCached.data : null
+    initialCached ? initialCached.data : null,
   );
   const [nativePdfUri, setNativePdfUri] = useState<string>(initialNativeUri);
   const [pdfDoc, setPdfDoc] = useState<any>(null);
   const [numPages, setNumPages] = useState<number>(
-    initialCached?.pageCount || 0
+    initialCached?.pageCount || 0,
   );
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [isLoading, setIsLoading] = useState<boolean>(!initialCached);
@@ -322,7 +322,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
         clearTimeout(debouncedScaleTimer.current);
       }
       debouncedScaleTimer.current = setTimeout(() => {
-        setZoom(+(newScale.toFixed(2)));
+        setZoom(+newScale.toFixed(2));
         triggerPageInteraction();
       }, 250);
     },
@@ -443,7 +443,9 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
             setIsLoading(false);
             return;
           }
-          throw new Error(`Could not load document content for ${activeTitle || targetId}`);
+          throw new Error(
+            `Could not load document content for ${activeTitle || targetId}`,
+          );
         }
 
         const currentBytes = item.data;
@@ -458,7 +460,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
           if (!currentUri && currentBytes.byteLength > 0) {
             currentUri = await getPdfLocalUri(
               currentBytes,
-              item.name || activeTitle
+              item.name || activeTitle,
             );
             if (isCancelled) return;
             setNativePdfUri(currentUri);
@@ -523,8 +525,15 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
           if (Platform.OS === "web" && typeof document !== "undefined") {
             const page = await pdfDoc.getPage(i);
             if (!page) continue;
-            const thumbViewport = page?.getViewport ? page.getViewport({ scale: 0.22, rotation }) : null;
-            if (!thumbViewport || typeof thumbViewport.width !== "number" || typeof thumbViewport.height !== "number") continue;
+            const thumbViewport = page?.getViewport
+              ? page.getViewport({ scale: 0.22, rotation })
+              : null;
+            if (
+              !thumbViewport ||
+              typeof thumbViewport.width !== "number" ||
+              typeof thumbViewport.height !== "number"
+            )
+              continue;
             const thumbCanvas = document.createElement("canvas");
             thumbCanvas.width = Math.floor(thumbViewport.width || 120);
             thumbCanvas.height = Math.floor(thumbViewport.height || 160);
@@ -697,8 +706,15 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
         try {
           const page = await pdfDoc.getPage(p);
           if (!page) continue;
-          const viewport = page?.getViewport ? page.getViewport({ scale: zoom * 0.9, rotation }) : null;
-          if (!viewport || typeof viewport.width !== "number" || typeof viewport.height !== "number") continue;
+          const viewport = page?.getViewport
+            ? page.getViewport({ scale: zoom * 0.9, rotation })
+            : null;
+          if (
+            !viewport ||
+            typeof viewport.width !== "number" ||
+            typeof viewport.height !== "number"
+          )
+            continue;
           const pixelRatio =
             (typeof window !== "undefined" && window.devicePixelRatio) || 1;
 
@@ -765,7 +781,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
       }
       triggerPageInteraction();
     },
-    [numPages, viewMode, triggerPageInteraction]
+    [numPages, viewMode, triggerPageInteraction],
   );
 
   // Sync current page smoothly when viewMode switches between single and continuous
@@ -826,9 +842,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
       return;
     }
     onShowToast(
-      next
-        ? "Screen rotated to landscape"
-        : "Screen rotated to portrait"
+      next ? "Screen rotated to landscape" : "Screen rotated to portrait",
     );
   };
 
@@ -836,7 +850,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
     const nextTheme: ReaderTheme = theme === "night" ? "light" : "night";
     handleUpdateTheme(nextTheme);
     onShowToast(
-      nextTheme === "night" ? "Dark Mode enabled" : "Light Mode enabled"
+      nextTheme === "night" ? "Dark Mode enabled" : "Light Mode enabled",
     );
   };
 
@@ -854,7 +868,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
       const success = await printNativePdf(
         targetUri || targetBytes || new Uint8Array(),
         activeTitle,
-        isHorizontal
+        isHorizontal,
       );
 
       if (!success) {
@@ -887,12 +901,16 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
       onShowToast(`Sharing "${activeTitle}"...`);
       const success = await shareNativePdf(
         targetUri || targetBytes || new Uint8Array(),
-        activeTitle
+        activeTitle,
       );
       if (success) {
         onShowToast("Document shared");
       } else {
-        if (Platform.OS === "web" && typeof navigator !== "undefined" && navigator.clipboard) {
+        if (
+          Platform.OS === "web" &&
+          typeof navigator !== "undefined" &&
+          navigator.clipboard
+        ) {
           await navigator.clipboard.writeText(window.location.href);
           onShowToast("Document link copied to clipboard");
         } else {
@@ -901,7 +919,11 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
       }
     } catch (err: any) {
       if (err?.name !== "AbortError") {
-        onShowToast(Platform.OS === "web" ? "Document link copied to clipboard" : "Share dismissed");
+        onShowToast(
+          Platform.OS === "web"
+            ? "Document link copied to clipboard"
+            : "Share dismissed",
+        );
       }
     }
   };
@@ -994,7 +1016,10 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
   // 10. Open in Native System Viewer (Apple QuickLook / Android System PDF Reader)
   const handleOpenSystemViewer = async () => {
     const targetSource = nativePdfUri || pdfBytes;
-    if (!targetSource || (typeof targetSource !== "string" && targetSource.byteLength === 0)) {
+    if (
+      !targetSource ||
+      (typeof targetSource !== "string" && targetSource.byteLength === 0)
+    ) {
       onShowToast("PDF data not ready");
       return;
     }
@@ -1191,461 +1216,482 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
             )}
 
             {/* Load Error State */}
-        {loadError && !isLoading && (
-          <View style={styles.errorContainer}>
-            <Ionicons name="alert-circle-outline" size={48} color="#ff516a" />
-            <Text style={styles.errorTitle}>Unable to read this PDF</Text>
-            <Text style={styles.errorSubtitle}>{loadError}</Text>
-            <TouchableOpacity
-              onPress={handlePickAnotherPdf}
-              style={styles.retryBtn}
-              activeOpacity={0.8}
-            >
-              <Ionicons
-                name="folder-open-outline"
-                size={16}
-                color="#ffffff"
-                style={{ marginRight: 6 }}
-              />
-              <Text style={styles.retryBtnText}>
-                Choose Another PDF from Device
-              </Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* 1. REFLOW / PURE TEXT READER MODE */}
-        {!isLoading && !loadError && reflow && (
-          <View
-            style={[
-              styles.reflowContainer,
-              { backgroundColor: t.paperBg, borderColor: t.border },
-            ]}
-          >
-            <View style={styles.reflowHeader}>
-              <View style={styles.reflowPageBadge}>
-                <Ionicons name="document-text" size={13} color="#0284c7" />
-                <Text style={styles.reflowPageBadgeText}>
-                  REFLOW • PAGE {currentPage} OF {numPages}
-                </Text>
-              </View>
-              <View style={styles.reflowControls}>
+            {loadError && !isLoading && (
+              <View style={styles.errorContainer}>
+                <Ionicons
+                  name="alert-circle-outline"
+                  size={48}
+                  color="#ff516a"
+                />
+                <Text style={styles.errorTitle}>Unable to read this PDF</Text>
+                <Text style={styles.errorSubtitle}>{loadError}</Text>
                 <TouchableOpacity
-                  onPress={() =>
-                    handleUpdateFontSize(Math.max(12, reflowFontSize - 2))
-                  }
-                  style={styles.reflowBtn}
-                  accessibilityLabel="Decrease Font Size"
+                  onPress={handlePickAnotherPdf}
+                  style={styles.retryBtn}
+                  activeOpacity={0.8}
                 >
-                  <Text style={styles.reflowBtnText}>A-</Text>
-                </TouchableOpacity>
-
-                <View style={styles.reflowFontSizeBadge}>
-                  <Text style={styles.reflowFontSizeText}>
-                    {reflowFontSize}px
+                  <Ionicons
+                    name="folder-open-outline"
+                    size={16}
+                    color="#ffffff"
+                    style={{ marginRight: 6 }}
+                  />
+                  <Text style={styles.retryBtnText}>
+                    Choose Another PDF from Device
                   </Text>
-                </View>
-
-                <TouchableOpacity
-                  onPress={() =>
-                    handleUpdateFontSize(Math.min(32, reflowFontSize + 2))
-                  }
-                  style={styles.reflowBtn}
-                  accessibilityLabel="Increase Font Size"
-                >
-                  <Text style={styles.reflowBtnText}>A+</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  onPress={() => setShowViewModeModal(true)}
-                  style={styles.reflowOptionsBtn}
-                  accessibilityLabel="View Mode Options"
-                >
-                  <MaterialIcons name="tune" size={14} color="#7bd0ff" />
-                  <Text style={styles.reflowOptionsBtnText}>Options</Text>
                 </TouchableOpacity>
               </View>
-            </View>
+            )}
 
-            <View style={styles.reflowParagraphsContainer}>
-              {reflowParagraphs.map((para, idx) => (
-                <Text
-                  key={idx}
-                  style={[
-                    styles.reflowParagraph,
-                    {
-                      color: t.text,
-                      fontSize: reflowFontSize,
-                      lineHeight: Math.round(reflowFontSize * 1.68),
-                    },
-                  ]}
-                >
-                  {para}
-                </Text>
-              ))}
-            </View>
-          </View>
-        )}
-
-        {/* 2. REAL CANVAS / NATIVE PDF RENDERING */}
-        {!isLoading &&
-          !loadError &&
-          !reflow &&
-          (Platform.OS !== "web" || viewMode === "single") && (
-            <View
-              style={[
-                styles.pageOuterWrapper,
-                {
-                  minHeight:
-                    Platform.OS !== "web"
-                      ? Math.max(0, windowHeight - 140)
-                      : undefined,
-                },
-              ]}
-            >
+            {/* 1. REFLOW / PURE TEXT READER MODE */}
+            {!isLoading && !loadError && reflow && (
               <View
                 style={[
-                  styles.pdfPaper,
-                  {
-                    backgroundColor: t.paperBg,
-                    borderColor: "transparent",
-                    minHeight:
-                      Platform.OS !== "web"
-                        ? Math.max(0, windowHeight - 140)
-                        : undefined,
-                    width:
-                      Platform.OS === "web" && zoom > 1
-                        ? `${Math.round(zoom * 100)}%`
-                        : "100%",
-                  },
+                  styles.reflowContainer,
+                  { backgroundColor: t.paperBg, borderColor: t.border },
                 ]}
               >
-                {/* Canvas viewport container */}
+                <View style={styles.reflowHeader}>
+                  <View style={styles.reflowPageBadge}>
+                    <Ionicons name="document-text" size={13} color="#0284c7" />
+                    <Text style={styles.reflowPageBadgeText}>
+                      REFLOW • PAGE {currentPage} OF {numPages}
+                    </Text>
+                  </View>
+                  <View style={styles.reflowControls}>
+                    <TouchableOpacity
+                      onPress={() =>
+                        handleUpdateFontSize(Math.max(12, reflowFontSize - 2))
+                      }
+                      style={styles.reflowBtn}
+                      accessibilityLabel="Decrease Font Size"
+                    >
+                      <Text style={styles.reflowBtnText}>A-</Text>
+                    </TouchableOpacity>
+
+                    <View style={styles.reflowFontSizeBadge}>
+                      <Text style={styles.reflowFontSizeText}>
+                        {reflowFontSize}px
+                      </Text>
+                    </View>
+
+                    <TouchableOpacity
+                      onPress={() =>
+                        handleUpdateFontSize(Math.min(32, reflowFontSize + 2))
+                      }
+                      style={styles.reflowBtn}
+                      accessibilityLabel="Increase Font Size"
+                    >
+                      <Text style={styles.reflowBtnText}>A+</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      onPress={() => setShowViewModeModal(true)}
+                      style={styles.reflowOptionsBtn}
+                      accessibilityLabel="View Mode Options"
+                    >
+                      <MaterialIcons name="tune" size={14} color="#7bd0ff" />
+                      <Text style={styles.reflowOptionsBtnText}>Options</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                <View style={styles.reflowParagraphsContainer}>
+                  {reflowParagraphs.map((para, idx) => (
+                    <Text
+                      key={idx}
+                      style={[
+                        styles.reflowParagraph,
+                        {
+                          color: t.text,
+                          fontSize: reflowFontSize,
+                          lineHeight: Math.round(reflowFontSize * 1.68),
+                        },
+                      ]}
+                    >
+                      {para}
+                    </Text>
+                  ))}
+                </View>
+              </View>
+            )}
+
+            {/* 2. REAL CANVAS / NATIVE PDF RENDERING */}
+            {!isLoading &&
+              !loadError &&
+              !reflow &&
+              (Platform.OS !== "web" || viewMode === "single") && (
                 <View
                   style={[
-                    styles.canvasRelativeWrapper,
+                    styles.pageOuterWrapper,
                     {
-                      width: "100%",
-                      filter: t.canvasFilter as any,
                       minHeight:
                         Platform.OS !== "web"
                           ? Math.max(0, windowHeight - 140)
                           : undefined,
                     },
                   ]}
-                  {...(Platform.OS === "web"
-                    ? {
-                        onClick: (e: any) => {
-                          handleCanvasClick(e);
-                          handleSingleTap();
-                        },
-                        onMouseDown: startDrawing,
-                        onMouseMove: drawMove,
-                        onMouseUp: stopDrawing,
-                        onMouseLeave: stopDrawing,
-                      }
-                    : {})}
                 >
-                  {/* Visual PDF Document View: Using react-native-pdf Package */}
-                  {pdfSource.uri ? (
-                    <Pdf
-                      ref={canvasRef as any}
-                      source={pdfSource}
-                      page={currentPage}
-                      scale={Platform.OS === "web" ? zoom : nativeScale}
-                      {...({ rotation } as any)}
-                      minScale={0.5}
-                      maxScale={4.0}
-                      fitPolicy={0}
-                      enablePaging={viewMode === "single"}
-                      enableAntialiasing={true}
-                      enableDoubleTapZoom={true}
-                      spacing={10}
-                      renderActivityIndicator={() => <View />}
-                      horizontal={readingDirection === "horizontal"}
-                      onPageSingleTap={handleSingleTap}
-                      onScaleChanged={handleScaleChanged}
-                      onLoadComplete={(loadedPages) => {
-                        setNumPages(loadedPages);
-                        setIsLoading(false);
-                        triggerPageInteraction();
-                        if (docId && loadedPages > 0) {
-                          pdfStore.updatePageCount(docId, loadedPages);
-                        }
-                      }}
-                      onPageChanged={(page, total) => {
-                        setCurrentPage((prev) => (prev !== page ? page : prev));
-                        setNumPages((prev) => (prev !== total ? total : prev));
-                        triggerPageInteraction();
-                      }}
-                      onError={(err) => {
-                        console.warn("react-native-pdf view note:", err);
-                      }}
-                      style={styles.pdfViewer}
-                    />
-                  ) : (
-                    <ActivityIndicator size="small" color="#7bd0ff" />
-                  )}
+                  <View
+                    style={[
+                      styles.pdfPaper,
+                      {
+                        backgroundColor: t.paperBg,
+                        borderColor: "transparent",
+                        minHeight:
+                          Platform.OS !== "web"
+                            ? Math.max(0, windowHeight - 140)
+                            : undefined,
+                        width:
+                          Platform.OS === "web" && zoom > 1
+                            ? `${Math.round(zoom * 100)}%`
+                            : "100%",
+                      },
+                    ]}
+                  >
+                    {/* Canvas viewport container */}
+                    <View
+                      style={[
+                        styles.canvasRelativeWrapper,
+                        {
+                          width: "100%",
+                          filter: t.canvasFilter as any,
+                          minHeight:
+                            Platform.OS !== "web"
+                              ? Math.max(0, windowHeight - 140)
+                              : undefined,
+                        },
+                      ]}
+                      {...(Platform.OS === "web"
+                        ? {
+                            onClick: (e: any) => {
+                              handleCanvasClick(e);
+                              handleSingleTap();
+                            },
+                            onMouseDown: startDrawing,
+                            onMouseMove: drawMove,
+                            onMouseUp: stopDrawing,
+                            onMouseLeave: stopDrawing,
+                          }
+                        : {})}
+                    >
+                      {/* Visual PDF Document View: Using react-native-pdf Package */}
+                      {pdfSource.uri ? (
+                        <Pdf
+                          ref={canvasRef as any}
+                          source={pdfSource}
+                          page={currentPage}
+                          scale={Platform.OS === "web" ? zoom : nativeScale}
+                          {...({ rotation } as any)}
+                          minScale={0.5}
+                          maxScale={4.0}
+                          fitPolicy={0}
+                          enablePaging={viewMode === "single"}
+                          enableAntialiasing={true}
+                          enableDoubleTapZoom={true}
+                          spacing={10}
+                          renderActivityIndicator={() => <View />}
+                          horizontal={readingDirection === "horizontal"}
+                          onPageSingleTap={handleSingleTap}
+                          onScaleChanged={handleScaleChanged}
+                          onLoadComplete={(loadedPages) => {
+                            setNumPages(loadedPages);
+                            setIsLoading(false);
+                            triggerPageInteraction();
+                            if (docId && loadedPages > 0) {
+                              pdfStore.updatePageCount(docId, loadedPages);
+                            }
+                          }}
+                          onPageChanged={(page, total) => {
+                            setCurrentPage((prev) =>
+                              prev !== page ? page : prev,
+                            );
+                            setNumPages((prev) =>
+                              prev !== total ? total : prev,
+                            );
+                            triggerPageInteraction();
+                          }}
+                          onError={(err) => {
+                            console.warn("react-native-pdf view note:", err);
+                          }}
+                          style={styles.pdfViewer}
+                        />
+                      ) : (
+                        <ActivityIndicator size="small" color="#7bd0ff" />
+                      )}
 
-                  {/* Freehand Drawing Overlay Canvas */}
-                  {Platform.OS === "web" && (
-                    <canvas
-                      ref={drawCanvasRef}
-                      style={{
-                        position: "absolute",
-                        top: 0,
-                        left: 0,
-                        width: "100%",
-                        height: "100%",
-                        pointerEvents:
-                          activeTool === "pen" || activeTool === "highlighter"
-                            ? "auto"
-                            : "none",
-                        maxWidth: "100%",
-                      }}
-                    />
-                  )}
+                      {/* Freehand Drawing Overlay Canvas */}
+                      {Platform.OS === "web" && (
+                        <canvas
+                          ref={drawCanvasRef}
+                          style={{
+                            position: "absolute",
+                            top: 0,
+                            left: 0,
+                            width: "100%",
+                            height: "100%",
+                            pointerEvents:
+                              activeTool === "pen" ||
+                              activeTool === "highlighter"
+                                ? "auto"
+                                : "none",
+                            maxWidth: "100%",
+                          }}
+                        />
+                      )}
 
-                  {/* Notes and Stamps Overlays */}
-                  {notes
-                    .filter((n) => n.page === currentPage)
-                    .map((note) => (
+                      {/* Notes and Stamps Overlays */}
+                      {notes
+                        .filter((n) => n.page === currentPage)
+                        .map((note) => (
+                          <View
+                            key={note.id}
+                            style={[
+                              styles.notePin,
+                              {
+                                top: `${note.y}%` as any,
+                                left: `${note.x}%` as any,
+                              },
+                            ]}
+                          >
+                            <TouchableOpacity
+                              onPress={() => setActiveNoteEditing(note.id)}
+                              style={styles.notePinIcon}
+                            >
+                              <Ionicons
+                                name="chatbubble"
+                                size={20}
+                                color="#f59e0b"
+                              />
+                            </TouchableOpacity>
+                            {activeNoteEditing === note.id && (
+                              <View style={styles.noteEditorCard}>
+                                <TextInput
+                                  value={newNoteInput}
+                                  onChangeText={setNewNoteInput}
+                                  style={styles.noteEditorInput}
+                                  multiline
+                                />
+                                <View style={styles.noteEditorActions}>
+                                  <TouchableOpacity
+                                    onPress={() => {
+                                      setNotes((prev) =>
+                                        prev.map((n) =>
+                                          n.id === note.id
+                                            ? { ...n, text: newNoteInput }
+                                            : n,
+                                        ),
+                                      );
+                                      setActiveNoteEditing(null);
+                                      onShowToast("Note updated");
+                                    }}
+                                    style={styles.noteSaveBtn}
+                                  >
+                                    <Text style={styles.noteSaveBtnText}>
+                                      Save
+                                    </Text>
+                                  </TouchableOpacity>
+                                  <TouchableOpacity
+                                    onPress={() => {
+                                      setNotes((prev) =>
+                                        prev.filter((n) => n.id !== note.id),
+                                      );
+                                      setActiveNoteEditing(null);
+                                    }}
+                                    style={styles.noteDeleteBtn}
+                                  >
+                                    <Text style={styles.noteDeleteBtnText}>
+                                      Delete
+                                    </Text>
+                                  </TouchableOpacity>
+                                </View>
+                              </View>
+                            )}
+                          </View>
+                        ))}
+
+                      {stamps
+                        .filter((s) => s.page === currentPage)
+                        .map((stamp) => (
+                          <View
+                            key={stamp.id}
+                            style={[
+                              styles.stampOverlay,
+                              {
+                                top: `${stamp.y}%` as any,
+                                left: `${stamp.x}%` as any,
+                              },
+                            ]}
+                          >
+                            <Ionicons
+                              name="shield-checkmark"
+                              size={16}
+                              color="#059669"
+                            />
+                            <Text style={styles.stampOverlayTitle}>
+                              {stamp.title}
+                            </Text>
+                            <Text style={styles.stampOverlayTime}>
+                              {stamp.time}
+                            </Text>
+                          </View>
+                        ))}
+                    </View>
+                  </View>
+                </View>
+              )}
+
+            {/* 3. CONTINUOUS SCROLL VIEW (WEB ONLY) */}
+            {!isLoading &&
+              !loadError &&
+              !reflow &&
+              Platform.OS === "web" &&
+              viewMode === "continuous" &&
+              (readingDirection === "horizontal" ? (
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={true}
+                  contentContainerStyle={styles.continuousContainerHorizontal}
+                  style={{ width: "100%" }}
+                >
+                  {Array.from({ length: numPages }, (_, i) => i + 1).map(
+                    (p) => (
                       <View
-                        key={note.id}
+                        key={p}
                         style={[
-                          styles.notePin,
+                          styles.continuousPageCardHorizontal,
                           {
-                            top: `${note.y}%` as any,
-                            left: `${note.x}%` as any,
+                            backgroundColor: t.paperBg,
+                            borderColor: t.border,
                           },
                         ]}
                       >
-                        <TouchableOpacity
-                          onPress={() => setActiveNoteEditing(note.id)}
-                          style={styles.notePinIcon}
+                        <View style={styles.continuousPageHeader}>
+                          <Text
+                            style={[
+                              styles.continuousPageNum,
+                              { color: t.muted },
+                            ]}
+                          >
+                            Page {p} of {numPages}
+                          </Text>
+                        </View>
+                        <View
+                          style={{
+                            filter: t.canvasFilter as any,
+                            alignItems: "center",
+                          }}
                         >
-                          <Ionicons
-                            name="chatbubble"
-                            size={20}
-                            color="#f59e0b"
-                          />
-                        </TouchableOpacity>
-                        {activeNoteEditing === note.id && (
-                          <View style={styles.noteEditorCard}>
-                            <TextInput
-                              value={newNoteInput}
-                              onChangeText={setNewNoteInput}
-                              style={styles.noteEditorInput}
-                              multiline
+                          {Platform.OS === "web" ? (
+                            <canvas
+                              ref={(el) => {
+                                if (el) continuousCanvases.current.set(p, el);
+                                else continuousCanvases.current.delete(p);
+                              }}
+                              style={{ display: "block", maxWidth: "100%" }}
                             />
-                            <View style={styles.noteEditorActions}>
-                              <TouchableOpacity
-                                onPress={() => {
-                                  setNotes((prev) =>
-                                    prev.map((n) =>
-                                      n.id === note.id
-                                        ? { ...n, text: newNoteInput }
-                                        : n,
-                                    ),
-                                  );
-                                  setActiveNoteEditing(null);
-                                  onShowToast("Note updated");
-                                }}
-                                style={styles.noteSaveBtn}
+                          ) : (
+                            <View style={styles.nativePdfFallbackCard}>
+                              <Ionicons
+                                name="document-text"
+                                size={32}
+                                color="#7bd0ff"
+                              />
+                              <Text
+                                style={[
+                                  styles.nativePdfFallbackSubtitle,
+                                  { color: t.text, fontWeight: "700" },
+                                ]}
                               >
-                                <Text style={styles.noteSaveBtnText}>Save</Text>
-                              </TouchableOpacity>
-                              <TouchableOpacity
-                                onPress={() => {
-                                  setNotes((prev) =>
-                                    prev.filter((n) => n.id !== note.id),
-                                  );
-                                  setActiveNoteEditing(null);
-                                }}
-                                style={styles.noteDeleteBtn}
+                                Page {p} of {numPages}
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+                      </View>
+                    ),
+                  )}
+                </ScrollView>
+              ) : (
+                <View
+                  ref={continuousContainerRef}
+                  style={styles.continuousContainer}
+                >
+                  {Array.from({ length: numPages }, (_, i) => i + 1).map(
+                    (p) => (
+                      <View
+                        key={p}
+                        style={[
+                          styles.continuousPageCard,
+                          {
+                            backgroundColor: t.paperBg,
+                            borderColor: t.border,
+                          },
+                        ]}
+                      >
+                        <View style={styles.continuousPageHeader}>
+                          <Text
+                            style={[
+                              styles.continuousPageNum,
+                              { color: t.muted },
+                            ]}
+                          >
+                            Page {p} of {numPages}
+                          </Text>
+                        </View>
+                        <View
+                          style={{
+                            filter: t.canvasFilter as any,
+                            alignItems: "center",
+                          }}
+                        >
+                          {Platform.OS === "web" ? (
+                            <canvas
+                              ref={(el) => {
+                                if (el) continuousCanvases.current.set(p, el);
+                                else continuousCanvases.current.delete(p);
+                              }}
+                              style={{ display: "block", maxWidth: "100%" }}
+                            />
+                          ) : (
+                            <View style={styles.nativePdfFallbackCard}>
+                              <Ionicons
+                                name="document-text"
+                                size={32}
+                                color="#7bd0ff"
+                              />
+                              <Text
+                                style={[
+                                  styles.nativePdfFallbackSubtitle,
+                                  { color: t.text, fontWeight: "700" },
+                                ]}
                               >
-                                <Text style={styles.noteDeleteBtnText}>
-                                  Delete
+                                Page {p} of {numPages}
+                              </Text>
+                              <TouchableOpacity
+                                style={styles.nativeContinuousBtn}
+                                onPress={handleOpenSystemViewer}
+                              >
+                                <Ionicons
+                                  name="open-outline"
+                                  size={14}
+                                  color="#0d0096"
+                                />
+                                <Text style={styles.nativeContinuousBtnText}>
+                                  Open with System Viewer
                                 </Text>
                               </TouchableOpacity>
                             </View>
-                          </View>
-                        )}
+                          )}
+                        </View>
                       </View>
-                    ))}
-
-                  {stamps
-                    .filter((s) => s.page === currentPage)
-                    .map((stamp) => (
-                      <View
-                        key={stamp.id}
-                        style={[
-                          styles.stampOverlay,
-                          {
-                            top: `${stamp.y}%` as any,
-                            left: `${stamp.x}%` as any,
-                          },
-                        ]}
-                      >
-                        <Ionicons
-                          name="shield-checkmark"
-                          size={16}
-                          color="#059669"
-                        />
-                        <Text style={styles.stampOverlayTitle}>
-                          {stamp.title}
-                        </Text>
-                        <Text style={styles.stampOverlayTime}>
-                          {stamp.time}
-                        </Text>
-                      </View>
-                    ))}
-                </View>
-              </View>
-            </View>
-          )}
-
-        {/* 3. CONTINUOUS SCROLL VIEW (WEB ONLY) */}
-        {!isLoading &&
-          !loadError &&
-          !reflow &&
-          Platform.OS === "web" &&
-          viewMode === "continuous" &&
-          (readingDirection === "horizontal" ? (
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={true}
-              contentContainerStyle={styles.continuousContainerHorizontal}
-              style={{ width: "100%" }}
-            >
-              {Array.from({ length: numPages }, (_, i) => i + 1).map((p) => (
-                <View
-                  key={p}
-                  style={[
-                    styles.continuousPageCardHorizontal,
-                    {
-                      backgroundColor: t.paperBg,
-                      borderColor: t.border,
-                    },
-                  ]}
-                >
-                  <View style={styles.continuousPageHeader}>
-                    <Text
-                      style={[styles.continuousPageNum, { color: t.muted }]}
-                    >
-                      Page {p} of {numPages}
-                    </Text>
-                  </View>
-                  <View
-                    style={{
-                      filter: t.canvasFilter as any,
-                      alignItems: "center",
-                    }}
-                  >
-                    {Platform.OS === "web" ? (
-                      <canvas
-                        ref={(el) => {
-                          if (el) continuousCanvases.current.set(p, el);
-                          else continuousCanvases.current.delete(p);
-                        }}
-                        style={{ display: "block", maxWidth: "100%" }}
-                      />
-                    ) : (
-                      <View style={styles.nativePdfFallbackCard}>
-                        <Ionicons
-                          name="document-text"
-                          size={32}
-                          color="#7bd0ff"
-                        />
-                        <Text
-                          style={[
-                            styles.nativePdfFallbackSubtitle,
-                            { color: t.text, fontWeight: "700" },
-                          ]}
-                        >
-                          Page {p} of {numPages}
-                        </Text>
-                      </View>
-                    )}
-                  </View>
+                    ),
+                  )}
                 </View>
               ))}
-            </ScrollView>
-          ) : (
-            <View
-              ref={continuousContainerRef}
-              style={styles.continuousContainer}
-            >
-              {Array.from({ length: numPages }, (_, i) => i + 1).map((p) => (
-                <View
-                  key={p}
-                  style={[
-                    styles.continuousPageCard,
-                    {
-                      backgroundColor: t.paperBg,
-                      borderColor: t.border,
-                    },
-                  ]}
-                >
-                  <View style={styles.continuousPageHeader}>
-                    <Text
-                      style={[styles.continuousPageNum, { color: t.muted }]}
-                    >
-                      Page {p} of {numPages}
-                    </Text>
-                  </View>
-                  <View
-                    style={{
-                      filter: t.canvasFilter as any,
-                      alignItems: "center",
-                    }}
-                  >
-                    {Platform.OS === "web" ? (
-                      <canvas
-                        ref={(el) => {
-                          if (el) continuousCanvases.current.set(p, el);
-                          else continuousCanvases.current.delete(p);
-                        }}
-                        style={{ display: "block", maxWidth: "100%" }}
-                      />
-                    ) : (
-                      <View style={styles.nativePdfFallbackCard}>
-                        <Ionicons
-                          name="document-text"
-                          size={32}
-                          color="#7bd0ff"
-                        />
-                        <Text
-                          style={[
-                            styles.nativePdfFallbackSubtitle,
-                            { color: t.text, fontWeight: "700" },
-                          ]}
-                        >
-                          Page {p} of {numPages}
-                        </Text>
-                        <TouchableOpacity
-                          style={styles.nativeContinuousBtn}
-                          onPress={handleOpenSystemViewer}
-                        >
-                          <Ionicons
-                            name="open-outline"
-                            size={14}
-                            color="#0d0096"
-                          />
-                          <Text style={styles.nativeContinuousBtnText}>
-                            Open with System Viewer
-                          </Text>
-                        </TouchableOpacity>
-                      </View>
-                    )}
-                  </View>
-                </View>
-              ))}
-            </View>
-          ))}
 
-        {/* Real Dynamic Thumbnail Strip */}
-        {/* {showThumbnails && !isLoading && !loadError && (
+            {/* Real Dynamic Thumbnail Strip */}
+            {/* {showThumbnails && !isLoading && !loadError && (
           <View style={styles.thumbnailStrip}>
             <View style={styles.thumbStripHeader}>
               <Text style={styles.thumbStripTitle}>
@@ -1756,7 +1802,9 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
           onToggleBookmark={() => {
             setIsBookmarked((prev) => {
               const next = !prev;
-              onShowToast(next ? `Page ${currentPage} bookmarked` : "Bookmark removed");
+              onShowToast(
+                next ? `Page ${currentPage} bookmarked` : "Bookmark removed",
+              );
               return next;
             });
           }}
@@ -1769,7 +1817,12 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
         {searchOpen && (
           <View style={styles.topSearchDrawer}>
             <View style={styles.searchInnerRow}>
-              <Ionicons name="search" size={17} color="#7bd0ff" style={{ marginRight: 6 }} />
+              <Ionicons
+                name="search"
+                size={17}
+                color="#7bd0ff"
+                style={{ marginRight: 6 }}
+              />
               <TextInput
                 style={styles.searchDrawerInputField}
                 placeholder="Find in document..."
@@ -1781,7 +1834,11 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                 autoFocus
               />
               {isSearching && (
-                <ActivityIndicator size="small" color="#7bd0ff" style={{ marginHorizontal: 6 }} />
+                <ActivityIndicator
+                  size="small"
+                  color="#7bd0ff"
+                  style={{ marginHorizontal: 6 }}
+                />
               )}
               {searchResults.length > 0 && (
                 <View style={styles.searchMatchCounter}>
@@ -1834,7 +1891,9 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
             <View style={styles.topThumbStripHeader}>
               <View style={styles.thumbStripTitleGroup}>
                 <Ionicons name="albums-outline" size={15} color="#7bd0ff" />
-                <Text style={styles.topThumbStripTitle}>PAGES ({numPages})</Text>
+                <Text style={styles.topThumbStripTitle}>
+                  PAGES ({numPages})
+                </Text>
               </View>
               <TouchableOpacity
                 onPress={() => setShowThumbnails(false)}
@@ -1848,35 +1907,45 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.thumbScrollContainer}
             >
-              {Array.from({ length: numPages }, (_, idx) => idx + 1).map((p) => {
-                const isCur = currentPage === p;
-                const thumbData = thumbnails[p];
-                return (
-                  <TouchableOpacity
-                    key={p}
-                    onPress={() => handleSelectPage(p)}
-                    style={[styles.thumbCardItem, isCur && styles.thumbCardItemActive]}
-                    activeOpacity={0.7}
-                  >
-                    <View style={styles.thumbCardPreview}>
-                      {thumbData ? (
-                        <Image
-                          source={{ uri: thumbData }}
-                          style={styles.thumbCardImg}
-                          resizeMode="contain"
-                        />
-                      ) : (
-                        <View style={styles.thumbCardPlaceholder}>
-                          <Text style={styles.thumbCardNum}>{p}</Text>
-                        </View>
-                      )}
-                    </View>
-                    <Text style={[styles.thumbCardLabel, isCur && styles.thumbCardLabelActive]}>
-                      P. {p}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
+              {Array.from({ length: numPages }, (_, idx) => idx + 1).map(
+                (p) => {
+                  const isCur = currentPage === p;
+                  const thumbData = thumbnails[p];
+                  return (
+                    <TouchableOpacity
+                      key={p}
+                      onPress={() => handleSelectPage(p)}
+                      style={[
+                        styles.thumbCardItem,
+                        isCur && styles.thumbCardItemActive,
+                      ]}
+                      activeOpacity={0.7}
+                    >
+                      <View style={styles.thumbCardPreview}>
+                        {thumbData ? (
+                          <Image
+                            source={{ uri: thumbData }}
+                            style={styles.thumbCardImg}
+                            resizeMode="contain"
+                          />
+                        ) : (
+                          <View style={styles.thumbCardPlaceholder}>
+                            <Text style={styles.thumbCardNum}>{p}</Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text
+                        style={[
+                          styles.thumbCardLabel,
+                          isCur && styles.thumbCardLabelActive,
+                        ]}
+                      >
+                        P. {p}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                },
+              )}
             </ScrollView>
           </View>
         )}
