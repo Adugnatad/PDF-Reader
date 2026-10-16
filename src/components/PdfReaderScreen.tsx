@@ -27,7 +27,7 @@ import { Header } from "./Header";
 import { ReaderTheme } from "../types";
 import { pdfStore } from "../services/pdfStore";
 import { pdfjsLib } from "../services/pdfService";
-import { ViewModeModal } from "./ViewModeModal";
+import { GoToPageModal } from "./GoToPageModal";
 import { pickPdfFromDevice } from "../services/nativeFilePicker";
 import Pdf from "react-native-pdf";
 import { fastUint8ToBase64 } from "../utils/fastBase64";
@@ -225,13 +225,33 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
     [viewMode, reflow, reflowFontSize, theme],
   );
 
-  const [showViewModeModal, setShowViewModeModal] = useState<boolean>(false);
+  const handleToggleViewMode = useCallback(() => {
+    const nextMode = viewMode === "single" ? "continuous" : "single";
+    handleUpdateViewMode(nextMode);
+    onShowToast(
+      nextMode === "single"
+        ? "Switched to Page-by-Page View"
+        : "Switched to Continuous Scroll",
+    );
+  }, [viewMode, handleUpdateViewMode, onShowToast]);
+
+  const handleToggleReadingDirection = useCallback(() => {
+    const nextDir = readingDirection === "vertical" ? "horizontal" : "vertical";
+    handleUpdateReadingDirection(nextDir);
+    onShowToast(
+      nextDir === "vertical"
+        ? "Switched to Vertical Reading"
+        : "Switched to Horizontal Reading",
+    );
+  }, [readingDirection, handleUpdateReadingDirection, onShowToast]);
+
   const [zoom, setZoom] = useState<number>(1.0);
   const [nativeScale, setNativeScale] = useState<number>(1.0);
   const [rotation, setRotation] = useState<number>(0);
   const [isHorizontal, setIsHorizontal] = useState<boolean>(false);
   const isHorizontalRef = useRef(false);
-  const { height: windowHeight } = useWindowDimensions();
+  const { height: windowHeight, width: windowWidth } = useWindowDimensions();
+  const isLandscape = isHorizontal || windowWidth > windowHeight;
   const [showThumbnails, setShowThumbnails] = useState<boolean>(false);
   const [isBookmarked, setIsBookmarked] = useState<boolean>(false);
   const [showPagePicker, setShowPagePicker] = useState<boolean>(false);
@@ -243,6 +263,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
         await ScreenOrientation.lockAsync(
           ScreenOrientation.OrientationLock.PORTRAIT_UP,
         );
+        StatusBar.setHidden(false, "fade");
       } else {
         setRotation(0);
       }
@@ -279,12 +300,15 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
 
   useEffect(
     () => () => {
-      if (Platform.OS !== "web" && isHorizontalRef.current) {
-        ScreenOrientation.lockAsync(
-          ScreenOrientation.OrientationLock.PORTRAIT_UP,
-        ).catch((error) => {
-          console.warn("Could not restore portrait orientation:", error);
-        });
+      if (Platform.OS !== "web") {
+        StatusBar.setHidden(false, "fade");
+        if (isHorizontalRef.current) {
+          ScreenOrientation.lockAsync(
+            ScreenOrientation.OrientationLock.PORTRAIT_UP,
+          ).catch((error) => {
+            console.warn("Could not restore portrait orientation:", error);
+          });
+        }
       }
     },
     [],
@@ -781,7 +805,14 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
     const target = Math.max(1, Math.min(numPages, pageNum));
     setCurrentPage(target);
     canvasRef.current?.setPage?.(target);
+    if (viewMode === "continuous" && Platform.OS === "web") {
+      const el = continuousCanvases.current.get(target);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }
     setShowPagePicker(false);
+    triggerPageInteraction();
     onShowToast(`Jumped to Page ${target}`);
   };
 
@@ -793,7 +824,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
       if (viewMode === "continuous" && Platform.OS === "web") {
         const el = continuousCanvases.current.get(target);
         if (el) {
-          el.scrollIntoView({ behavior: "smooth", block: "start" });
+          el.scrollIntoView({ behavior: "auto", block: "start" });
         }
       }
       triggerPageInteraction();
@@ -848,6 +879,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
             ? ScreenOrientation.OrientationLock.LANDSCAPE
             : ScreenOrientation.OrientationLock.PORTRAIT_UP,
         );
+        StatusBar.setHidden(next, "fade");
       } else {
         setRotation(next ? 90 : 0);
       }
@@ -1188,6 +1220,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
         barStyle={theme === "light" ? "dark-content" : "light-content"}
         translucent
         backgroundColor="transparent"
+        hidden={isLandscape}
       />
 
       {/* Main Document Content (Non-scrollable View on native PDF to avoid gesture conflicts and crashes) */}
@@ -1290,12 +1323,12 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  onPress={() => setShowViewModeModal(true)}
+                  onPress={() => setShowPagePicker(true)}
                   style={styles.reflowOptionsBtn}
-                  accessibilityLabel="View Mode Options"
+                  accessibilityLabel="Go to Page"
                 >
-                  <MaterialIcons name="tune" size={14} color="#7bd0ff" />
-                  <Text style={styles.reflowOptionsBtnText}>Options</Text>
+                  <MaterialIcons name="find-in-page" size={14} color="#7bd0ff" />
+                  <Text style={styles.reflowOptionsBtnText}>Go to Page</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -1793,7 +1826,11 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
               return next;
             });
           }}
-          onOpenViewMode={() => setShowViewModeModal(true)}
+          viewMode={viewMode}
+          onToggleViewMode={handleToggleViewMode}
+          readingDirection={readingDirection}
+          onToggleReadingDirection={handleToggleReadingDirection}
+          onOpenGoToPage={() => setShowPagePicker(true)}
           onRotate={handleRotate}
           onDownload={handleDownload}
         />
@@ -1937,16 +1974,6 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
           <View style={styles.bottomBarInner}>
             <TouchableOpacity
               style={styles.viewModeBottomInner}
-              onPress={() => setShowViewModeModal(true)}
-              activeOpacity={0.7}
-              accessibilityLabel="View Mode"
-              accessibilityRole="button"
-            >
-              <MaterialIcons name="book" size={23} color="#fff" />
-              <Text style={styles.viewModeBtnTitle}>View Mode</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.viewModeBottomInner}
               onPress={() => {
                 onShowToast("Edit & annotation tools enabled");
               }}
@@ -1959,13 +1986,13 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.viewModeBottomInner}
-              onPress={() => setShowViewModeModal(true)}
+              onPress={() => setShowPagePicker(true)}
               activeOpacity={0.7}
-              accessibilityLabel="Settings"
+              accessibilityLabel="Go to Page"
               accessibilityRole="button"
             >
-              <MaterialIcons name="settings" size={23} color="#fff" />
-              <Text style={styles.viewModeBtnTitle}>Settings</Text>
+              <MaterialIcons name="find-in-page" size={23} color="#fff" />
+              <Text style={styles.viewModeBtnTitle}>Go to Page</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -1978,12 +2005,16 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
           {
             opacity: pillOpacity,
             top: !showBars
-              ? Platform.OS === "ios"
-                ? 52
-                : 20
-              : Platform.OS === "ios"
-                ? 104
-                : 74,
+              ? isLandscape
+                ? 12
+                : Platform.OS === "ios"
+                  ? 52
+                  : 20
+              : isLandscape
+                ? 64
+                : Platform.OS === "ios"
+                  ? 104
+                  : 74,
           },
         ]}
         pointerEvents="box-none"
@@ -2010,22 +2041,30 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
         numPages={numPages}
         onPageChange={handleSideScrubberPageChange}
         topOffset={
-          showBars
-            ? Platform.OS === "ios"
-              ? 98
-              : 82
-            : Platform.OS === "ios"
-              ? 42
-              : 26
+          isLandscape
+            ? showBars
+              ? 64
+              : 12
+            : showBars
+              ? Platform.OS === "ios"
+                ? 98
+                : 82
+              : Platform.OS === "ios"
+                ? 42
+                : 26
         }
         bottomOffset={
-          showBars
-            ? Platform.OS === "ios"
-              ? 98
-              : 82
-            : Platform.OS === "ios"
-              ? 42
-              : 26
+          isLandscape
+            ? showBars
+              ? 64
+              : 12
+            : showBars
+              ? Platform.OS === "ios"
+                ? 98
+                : 82
+              : Platform.OS === "ios"
+                ? 42
+                : 26
         }
         theme={theme}
         thumbnails={thumbnails}
@@ -2033,21 +2072,14 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
         docTitle={activeTitle}
       />
 
-      {/* View Mode Modal Component */}
-      <ViewModeModal
-        visible={showViewModeModal}
-        onClose={() => setShowViewModeModal(false)}
-        viewMode={viewMode}
-        onChangeViewMode={handleUpdateViewMode}
-        reflow={reflow}
-        onToggleReflow={handleUpdateReflow}
-        reflowFontSize={reflowFontSize}
-        onChangeFontSize={handleUpdateFontSize}
+      {/* Go To Page Modal Component */}
+      <GoToPageModal
+        visible={showPagePicker}
+        onClose={() => setShowPagePicker(false)}
+        currentPage={currentPage}
+        numPages={numPages}
+        onGoToPage={handleSelectPage}
         theme={theme}
-        onChangeTheme={handleUpdateTheme}
-        readingDirection={readingDirection}
-        onChangeReadingDirection={handleUpdateReadingDirection}
-        onShowToast={onShowToast}
       />
     </View>
   );

@@ -31,13 +31,13 @@ export const PdfSplashScreen: React.FC<PdfSplashScreenProps> = ({
           toValue: 1,
           duration: 1100,
           easing: Easing.inOut(Easing.ease),
-          useNativeDriver: false,
+          useNativeDriver: true,
         }),
         Animated.timing(moveAnim, {
           toValue: 0,
           duration: 1100,
           easing: Easing.inOut(Easing.ease),
-          useNativeDriver: false,
+          useNativeDriver: true,
         }),
       ])
     );

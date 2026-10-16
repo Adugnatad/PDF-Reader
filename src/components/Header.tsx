@@ -36,6 +36,12 @@ export interface HeaderProps {
   onOpenViewMode?: () => void;
   onRotate?: () => void;
   onDownload?: () => void;
+  // View Mode, Reading Direction & Go to Page in 3-dots menu:
+  viewMode?: "single" | "continuous";
+  onToggleViewMode?: () => void;
+  readingDirection?: "horizontal" | "vertical";
+  onToggleReadingDirection?: () => void;
+  onOpenGoToPage?: () => void;
   // Dedicated Search Header controls:
   searchQuery?: string;
   onSearchQueryChange?: (q: string) => void;
@@ -69,6 +75,11 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenViewMode,
   onRotate,
   onDownload,
+  viewMode = "single",
+  onToggleViewMode,
+  readingDirection = "vertical",
+  onToggleReadingDirection,
+  onOpenGoToPage,
   searchQuery = "",
   onSearchQueryChange,
   onSearchSubmit,
@@ -232,6 +243,100 @@ export const Header: React.FC<HeaderProps> = ({
             <View
               style={[styles.dropdownMenu, isLight && styles.dropdownMenuLight]}
             >
+              {/* 1. Toggle Page by Page / Continuous Scroll */}
+              {onToggleViewMode && (
+                <TouchableOpacity
+                  onPress={() => {
+                    setMenuOpen(false);
+                    onToggleViewMode();
+                  }}
+                  style={styles.dropdownItem}
+                  activeOpacity={0.7}
+                >
+                  <MaterialIcons
+                    name={viewMode === "continuous" ? "auto-stories" : "view-stream"}
+                    size={17}
+                    color={isLight ? "#2563eb" : "#7bd0ff"}
+                  />
+                  <Text
+                    style={[
+                      styles.dropdownText,
+                      isLight && styles.dropdownTextLight,
+                    ]}
+                  >
+                    {viewMode === "continuous"
+                      ? "Page by Page View"
+                      : "Continuous Scroll"}
+                  </Text>
+                </TouchableOpacity>
+              )}
+
+              {/* 2. Toggle Vertical / Horizontal Reading Direction */}
+              {onToggleReadingDirection && (
+                <TouchableOpacity
+                  onPress={() => {
+                    setMenuOpen(false);
+                    onToggleReadingDirection();
+                  }}
+                  style={styles.dropdownItem}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons
+                    name={
+                      readingDirection === "horizontal"
+                        ? "swap-vertical"
+                        : "swap-horizontal"
+                    }
+                    size={17}
+                    color={isLight ? "#2563eb" : "#7bd0ff"}
+                  />
+                  <Text
+                    style={[
+                      styles.dropdownText,
+                      isLight && styles.dropdownTextLight,
+                    ]}
+                  >
+                    {readingDirection === "horizontal"
+                      ? "Vertical Reading"
+                      : "Horizontal Reading"}
+                  </Text>
+                </TouchableOpacity>
+              )}
+
+              {/* 3. Go to Page */}
+              {onOpenGoToPage && (
+                <TouchableOpacity
+                  onPress={() => {
+                    setMenuOpen(false);
+                    onOpenGoToPage();
+                  }}
+                  style={styles.dropdownItem}
+                  activeOpacity={0.7}
+                >
+                  <MaterialIcons
+                    name="find-in-page"
+                    size={17}
+                    color={isLight ? "#2563eb" : "#7bd0ff"}
+                  />
+                  <Text
+                    style={[
+                      styles.dropdownText,
+                      isLight && styles.dropdownTextLight,
+                    ]}
+                  >
+                    Go to Page
+                  </Text>
+                </TouchableOpacity>
+              )}
+
+              <View
+                style={[
+                  styles.dropdownDivider,
+                  isLight && styles.dropdownDividerLight,
+                ]}
+              />
+
+              {/* 4. Bookmark Page */}
               {onToggleBookmark && (
                 <TouchableOpacity
                   onPress={() => {
@@ -243,7 +348,7 @@ export const Header: React.FC<HeaderProps> = ({
                 >
                   <Ionicons
                     name={isBookmarked ? "bookmark" : "bookmark-outline"}
-                    size={16}
+                    size={17}
                     color="#f59e0b"
                   />
                   <Text
@@ -257,6 +362,7 @@ export const Header: React.FC<HeaderProps> = ({
                 </TouchableOpacity>
               )}
 
+              {/* 5. Rotate Page */}
               {onRotate && (
                 <TouchableOpacity
                   onPress={() => {
@@ -268,7 +374,7 @@ export const Header: React.FC<HeaderProps> = ({
                 >
                   <Ionicons
                     name="reload-outline"
-                    size={16}
+                    size={17}
                     color={isLight ? "#2563eb" : "#7bd0ff"}
                   />
                   <Text
@@ -282,6 +388,7 @@ export const Header: React.FC<HeaderProps> = ({
                 </TouchableOpacity>
               )}
 
+              {/* 6. Export / Download */}
               {onDownload && (
                 <TouchableOpacity
                   onPress={() => {
@@ -293,7 +400,7 @@ export const Header: React.FC<HeaderProps> = ({
                 >
                   <Ionicons
                     name="download-outline"
-                    size={16}
+                    size={17}
                     color={isLight ? "#2563eb" : "#7bd0ff"}
                   />
                   <Text
@@ -307,6 +414,7 @@ export const Header: React.FC<HeaderProps> = ({
                 </TouchableOpacity>
               )}
 
+              {/* 7. Open in System Reader */}
               {onOpenSystemViewer && (
                 <TouchableOpacity
                   onPress={() => {
@@ -318,7 +426,7 @@ export const Header: React.FC<HeaderProps> = ({
                 >
                   <Ionicons
                     name="open-outline"
-                    size={16}
+                    size={17}
                     color={isLight ? "#2563eb" : "#7bd0ff"}
                   />
                   <Text
@@ -469,6 +577,15 @@ const styles = StyleSheet.create({
   },
   dropdownTextLight: {
     color: "#0f172a",
+  },
+  dropdownDivider: {
+    height: 1,
+    backgroundColor: "rgba(45, 52, 73, 0.6)",
+    marginVertical: 4,
+    marginHorizontal: 8,
+  },
+  dropdownDividerLight: {
+    backgroundColor: "#e2e8f0",
   },
   searchHeaderRow: {
     flexDirection: "row",

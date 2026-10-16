@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useMemo } from 'react';
-import { View, ViewProps, StyleSheet } from 'react-native';
+import { View, ViewProps, StyleSheet, useWindowDimensions } from 'react-native';
 
 export interface EdgeInsets {
   top: number;
@@ -85,11 +85,13 @@ export const SafeAreaView = React.forwardRef<any, SafeAreaViewProps>(
     },
     ref
   ) => {
+    const { width, height } = useWindowDimensions();
+    const isLandscape = width > height;
     const insets = useSafeAreaInsets();
-    const includeTop = edges.includes('top');
-    const includeBottom = edges.includes('bottom');
-    const includeLeft = edges.includes('left');
-    const includeRight = edges.includes('right');
+    const includeTop = !isLandscape && edges.includes('top');
+    const includeBottom = !isLandscape && edges.includes('bottom');
+    const includeLeft = !isLandscape && edges.includes('left');
+    const includeRight = !isLandscape && edges.includes('right');
 
     const edgeStyle =
       mode === 'margin'

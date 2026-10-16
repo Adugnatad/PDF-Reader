@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
   StatusBar,
   StyleSheet,
@@ -8,6 +8,7 @@ import {
   StyleProp,
   ViewStyle,
   StatusBarStyle,
+  useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -18,19 +19,33 @@ export interface SafeAreaContainerProps {
   statusBarStyle?: StatusBarStyle;
   statusBarColor?: string;
   edges?: Array<'top' | 'bottom' | 'left' | 'right'>;
+  disableInLandscape?: boolean;
 }
 
 /**
  * Hook to safely read insets even if outside a SafeAreaProvider or on native devices
  * where Android system bars (soft navigation bar / 3-button navigation / gesture pill)
- * need explicit safe clearance.
+ * need explicit safe clearance in portrait mode.
+ *
+ * In landscape mode, insets are zeroed out to provide a full-screen experience.
  */
-export function useAppSafeInsets() {
+export function useAppSafeInsets(isLandscape = false) {
   let contextInsets = { top: 0, bottom: 0, left: 0, right: 0 };
   try {
     contextInsets = useSafeAreaInsets();
   } catch {
     // Fallback if rendered outside SafeAreaProvider
+  }
+
+  // If in landscape view, return zero insets for full-screen mode
+  if (isLandscape) {
+    return {
+      top: 0,
+      bottom: 0,
+      left: 0,
+      right: 0,
+      rawInsets: contextInsets,
+    };
   }
 
   const screenDim = Dimensions.get('screen');
@@ -70,7 +85,8 @@ export function useAppSafeInsets() {
  * Universal safe-area container for native devices (iOS notch/dynamic island & Android
  * status bar and 3-button / gesture system navigation bar) as well as mobile web.
  *
- * Guarantees that headers and bottom tab bars never collide with or overlay system bars.
+ * In portrait: Guarantees that headers and bottom tab bars never collide with or overlay system bars.
+ * In landscape: Removes safe area insets completely to achieve true full-screen mode.
  */
 export const SafeAreaContainer: React.FC<SafeAreaContainerProps> = ({
   children,
@@ -79,18 +95,30 @@ export const SafeAreaContainer: React.FC<SafeAreaContainerProps> = ({
   statusBarStyle = 'light-content',
   statusBarColor = '#0b1326',
   edges = ['top', 'bottom', 'left', 'right'],
+  disableInLandscape = true,
 }) => {
-  const safeInsets = useAppSafeInsets();
+  const { width, height } = useWindowDimensions();
+  const isLandscape = width > height;
+  const isLandscapeActive = isLandscape && disableInLandscape;
 
-  const includeTop = edges.includes('top');
-  const includeBottom = edges.includes('bottom');
-  const includeLeft = edges.includes('left');
-  const includeRight = edges.includes('right');
+  const safeInsets = useAppSafeInsets(isLandscapeActive);
+
+  const includeTop = !isLandscapeActive && edges.includes('top');
+  const includeBottom = !isLandscapeActive && edges.includes('bottom');
+  const includeLeft = !isLandscapeActive && edges.includes('left');
+  const includeRight = !isLandscapeActive && edges.includes('right');
 
   const topPadding = includeTop ? safeInsets.top : 0;
   const bottomPadding = includeBottom ? safeInsets.bottom : 0;
   const leftPadding = includeLeft ? safeInsets.left : 0;
   const rightPadding = includeRight ? safeInsets.right : 0;
+
+  // Toggle StatusBar visibility on native devices when entering/exiting landscape
+  useEffect(() => {
+    if (Platform.OS !== 'web') {
+      StatusBar.setHidden(isLandscapeActive, 'fade');
+    }
+  }, [isLandscapeActive]);
 
   return (
     <View
@@ -116,6 +144,7 @@ export const SafeAreaContainer: React.FC<SafeAreaContainerProps> = ({
         barStyle={statusBarStyle}
         backgroundColor={statusBarColor}
         translucent={Platform.OS === 'android'}
+        hidden={isLandscapeActive}
       />
       <View style={styles.content}>{children}</View>
     </View>
