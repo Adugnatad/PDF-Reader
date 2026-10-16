@@ -1,4 +1,4 @@
-import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
+import { PDFDocument, rgb, StandardFonts, PDFString } from 'pdf-lib';
 
 /**
  * Generates realistic, valid multi-page PDF documents using pdf-lib
@@ -407,11 +407,273 @@ export async function generateExecutiveAuditPdf(): Promise<Uint8Array> {
   const pdfDoc = await PDFDocument.create();
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  const italicFont = await pdfDoc.embedFont(StandardFonts.HelveticaOblique);
 
-  // 4 Page Report
-  for (let i = 1; i <= 4; i++) {
-    const page = pdfDoc.addPage([595, 842]);
-    const { width, height } = page.getSize();
+  // Pre-create all 5 pages
+  const pages: any[] = [];
+  for (let i = 1; i <= 5; i++) {
+    pages.push(pdfDoc.addPage([595, 842]));
+  }
+
+  // --- PAGE 1: Interactive Table of Contents (TOC) ---
+  const page1 = pages[0];
+  const { width, height } = page1.getSize();
+
+  // Header Bar
+  page1.drawRectangle({
+    x: 40,
+    y: height - 60,
+    width: width - 80,
+    height: 3,
+    color: rgb(0.08, 0.15, 0.35),
+  });
+
+  page1.drawText('EXECUTIVE AUDIT & COMPLIANCE REPORT 2026', {
+    x: 40,
+    y: height - 50,
+    size: 10,
+    font: boldFont,
+    color: rgb(0.1, 0.15, 0.3),
+  });
+
+  page1.drawText('PAGE 1 OF 5 • TOC', {
+    x: width - 130,
+    y: height - 50,
+    size: 9.5,
+    font: boldFont,
+    color: rgb(0.45, 0.5, 0.6),
+  });
+
+  page1.drawText('Table of Contents & Section Index', {
+    x: 40,
+    y: height - 100,
+    size: 22,
+    font: boldFont,
+    color: rgb(0.06, 0.1, 0.2),
+  });
+
+  page1.drawText('Tap or click any section below to jump directly to its audited report findings:', {
+    x: 40,
+    y: height - 125,
+    size: 11,
+    font: italicFont,
+    color: rgb(0.3, 0.38, 0.5),
+  });
+
+  // TOC Entries List
+  const tocEntries = [
+    {
+      title: 'Section 1: Executive Summary & Overall Risk Posture',
+      desc: 'Corporate governance, SOC 2 Type II controls, and Grade A certification',
+      targetPageIndex: 1, // Page 2 (0-indexed 1)
+      displayPage: 'Page 2',
+    },
+    {
+      title: 'Section 2: Financial Integrity & Revenue Controls',
+      desc: 'Balance sheet hygiene, ICFR effectiveness, 34.2% operating margin',
+      targetPageIndex: 2, // Page 3 (0-indexed 2)
+      displayPage: 'Page 3',
+    },
+    {
+      title: 'Section 3: Cybersecurity, Privacy & Data Governance',
+      desc: 'GDPR, CCPA, and HIPAA compliance audit with cryptographic logs',
+      targetPageIndex: 3, // Page 4 (0-indexed 3)
+      displayPage: 'Page 4',
+    },
+    {
+      title: 'Section 4: Formal Auditor Opinion & Certification Panel',
+      desc: 'Unqualified clean opinion signed by Hall, Morgan & Sterling LLP',
+      targetPageIndex: 4, // Page 5 (0-indexed 4)
+      displayPage: 'Page 5',
+    },
+  ];
+
+  let currentY = height - 180;
+  for (let i = 0; i < tocEntries.length; i++) {
+    const entry = tocEntries[i];
+    const targetPage = pages[entry.targetPageIndex];
+
+    // Card background for TOC entry
+    page1.drawRectangle({
+      x: 40,
+      y: currentY - 18,
+      width: width - 80,
+      height: 52,
+      color: rgb(0.96, 0.98, 1.0),
+      borderColor: rgb(0.82, 0.88, 0.96),
+      borderWidth: 1,
+    });
+
+    // Left accent bar
+    page1.drawRectangle({
+      x: 40,
+      y: currentY - 18,
+      width: 4,
+      height: 52,
+      color: rgb(0.15, 0.45, 0.85),
+    });
+
+    // Section title
+    page1.drawText(entry.title, {
+      x: 55,
+      y: currentY + 16,
+      size: 11.5,
+      font: boldFont,
+      color: rgb(0.08, 0.22, 0.55),
+    });
+
+    // Description text
+    page1.drawText(entry.desc, {
+      x: 55,
+      y: currentY - 2,
+      size: 9,
+      font: font,
+      color: rgb(0.35, 0.42, 0.52),
+    });
+
+    // Page badge
+    page1.drawRectangle({
+      x: width - 110,
+      y: currentY + 4,
+      width: 55,
+      height: 22,
+      color: rgb(0.88, 0.93, 1.0),
+      borderColor: rgb(0.6, 0.75, 0.95),
+      borderWidth: 1,
+    });
+
+    page1.drawText(entry.displayPage, {
+      x: width - 102,
+      y: currentY + 11,
+      size: 9,
+      font: boldFont,
+      color: rgb(0.1, 0.35, 0.75),
+    });
+
+    // Attach PDF Link Annotation for this TOC row (pointing to target section page)
+    try {
+      const linkAnnot = pdfDoc.context.obj({
+        Type: 'Annot',
+        Subtype: 'Link',
+        Rect: [40, currentY - 18, width - 40, currentY + 34],
+        Border: [0, 0, 0],
+        C: [0.15, 0.45, 0.85],
+        Dest: [targetPage.ref, 'Fit'],
+      });
+      const linkRef = pdfDoc.context.register(linkAnnot);
+      page1.node.addAnnot(linkRef);
+    } catch (annotErr) {
+      console.warn('Could not register TOC link annotation:', annotErr);
+    }
+
+    currentY -= 68;
+  }
+
+  // External Reference Link Box
+  const extBoxY = currentY - 20;
+  page1.drawRectangle({
+    x: 40,
+    y: extBoxY - 15,
+    width: width - 80,
+    height: 48,
+    color: rgb(0.98, 0.98, 0.99),
+    borderColor: rgb(0.75, 0.8, 0.88),
+    borderWidth: 1,
+  });
+
+  page1.drawText('REGULATORY FILING ARCHIVE • SEC EDGAR DATABASE', {
+    x: 55,
+    y: extBoxY + 16,
+    size: 10,
+    font: boldFont,
+    color: rgb(0.1, 0.55, 0.4),
+  });
+
+  page1.drawText('https://www.sec.gov (Tap to view public institutional filings)', {
+    x: 55,
+    y: extBoxY - 2,
+    size: 9,
+    font: italicFont,
+    color: rgb(0.2, 0.4, 0.65),
+  });
+
+  try {
+    const extAnnot = pdfDoc.context.obj({
+      Type: 'Annot',
+      Subtype: 'Link',
+      Rect: [40, extBoxY - 15, width - 40, extBoxY + 33],
+      Border: [0, 0, 0],
+      A: {
+        Type: 'Action',
+        S: 'URI',
+        URI: PDFString.of('https://www.sec.gov'),
+      },
+    });
+    const extRef = pdfDoc.context.register(extAnnot);
+    page1.node.addAnnot(extRef);
+  } catch (extErr) {
+    console.warn('Could not register external link annotation:', extErr);
+  }
+
+  // Page 1 Footer
+  page1.drawLine({
+    start: { x: 40, y: 50 },
+    end: { x: width - 40, y: 50 },
+    thickness: 1,
+    color: rgb(0.85, 0.88, 0.92),
+  });
+  page1.drawText('DocuFlow Compliance Verification • Standard ISO 32000 PDF Navigation Enabled', {
+    x: 40,
+    y: 35,
+    size: 8.5,
+    font: font,
+    color: rgb(0.5, 0.55, 0.65),
+  });
+
+  // --- PAGES 2 to 5: Content Sections ---
+  const sectionsContent = [
+    {
+      title: 'Executive Summary & Overall Risk Posture',
+      body:
+        'During the Q1-Q4 2025 assessment cycle, our independent audit teams evaluated corporate\n' +
+        'governance, financial reporting controls, data segregation policies, and SOC 2 Type II controls.\n\n' +
+        'KEY AUDIT FINDINGS:\n' +
+        '• Financial Reconciliation Accuracy: 99.98% across 4,200,000 ledger transactions.\n' +
+        '• Capital Reserve Ratio: 22.4% (Tier 1 capital benchmark comfortably exceeded).\n' +
+        '• Cloud Security Architecture: Zero critical vulnerabilities detected during red-team exercises.\n\n' +
+        'The overall compliance rating has been certified as GRADE A (UNQUALIFIED CLEAN OPINION).',
+    },
+    {
+      title: 'Financial Integrity & Revenue Controls',
+      body:
+        'This section analyzes balance sheet hygiene, deferred revenue schedules, and accounts receivable.\n' +
+        'Internal controls over financial reporting (ICFR) were observed to be operating effectively.\n\n' +
+        '• Consolidated Operating Margin: 34.2%\n' +
+        '• Free Cash Flow Generation: $84.2M\n' +
+        '• Bad Debt Provisions: <0.2% of gross revenues',
+    },
+    {
+      title: 'Cybersecurity, Privacy & Data Governance',
+      body:
+        'Auditors confirmed strict compliance with GDPR, CCPA, and HIPAA privacy rules.\n' +
+        'Customer document access logs are signed cryptographically with non-repudiation seals.\n' +
+        'Disaster recovery exercises achieved RTO < 15 minutes and RPO = 0.',
+    },
+    {
+      title: 'Formal Auditor Opinion & Signature Panel',
+      body:
+        'In our opinion, the consolidated financial statements present fairly, in all material respects,\n' +
+        'the financial position of the Enterprise as of December 31, 2025, in conformity with U.S. GAAP.\n\n' +
+        'Audit Partner: Katherine Hall, CPA\n' +
+        'Firm: Hall, Morgan & Sterling LLP\n' +
+        'Date: September 20, 2026',
+    },
+  ];
+
+  for (let s = 0; s < sectionsContent.length; s++) {
+    const pIdx = s + 1; // 1 to 4
+    const page = pages[pIdx];
+    const sec = sectionsContent[s];
 
     page.drawText('EXECUTIVE AUDIT & COMPLIANCE REPORT 2026', {
       x: 40,
@@ -421,7 +683,7 @@ export async function generateExecutiveAuditPdf(): Promise<Uint8Array> {
       color: rgb(0.1, 0.15, 0.3),
     });
 
-    page.drawText(`SECTION ${i} • PAGE ${i} OF 4`, {
+    page.drawText(`SECTION ${s + 1} • PAGE ${pIdx + 1} OF 5`, {
       x: width - 140,
       y: height - 60,
       size: 9.5,
@@ -436,103 +698,22 @@ export async function generateExecutiveAuditPdf(): Promise<Uint8Array> {
       color: rgb(0.1, 0.2, 0.45),
     });
 
-    if (i === 1) {
-      page.drawText('Executive Summary & Overall Risk Posture', {
-        x: 40,
-        y: height - 110,
-        size: 20,
-        font: boldFont,
-        color: rgb(0.08, 0.12, 0.2),
-      });
+    page.drawText(sec.title, {
+      x: 40,
+      y: height - 110,
+      size: 18,
+      font: boldFont,
+      color: rgb(0.08, 0.12, 0.2),
+    });
 
-      page.drawText(
-        'During the Q1-Q4 2025 assessment cycle, our independent audit teams evaluated corporate\n' +
-        'governance, financial reporting controls, data segregation policies, and SOC 2 Type II controls.\n\n' +
-        'KEY AUDIT FINDINGS:\n' +
-        '• Financial Reconciliation Accuracy: 99.98% across 4,200,000 ledger transactions.\n' +
-        '• Capital Reserve Ratio: 22.4% (Tier 1 capital benchmark comfortably exceeded).\n' +
-        '• Cloud Security Architecture: Zero critical vulnerabilities detected during red-team exercises.\n\n' +
-        'The overall compliance rating has been certified as GRADE A (UNQUALIFIED CLEAN OPINION).',
-        {
-          x: 40,
-          y: height - 160,
-          size: 11,
-          font: font,
-          color: rgb(0.15, 0.18, 0.25),
-          lineHeight: 20,
-        }
-      );
-    } else if (i === 2) {
-      page.drawText('Financial Integrity & Revenue Controls', {
-        x: 40,
-        y: height - 110,
-        size: 18,
-        font: boldFont,
-        color: rgb(0.08, 0.12, 0.2),
-      });
-
-      page.drawText(
-        'This section analyzes balance sheet hygiene, deferred revenue schedules, and accounts receivable.\n' +
-        'Internal controls over financial reporting (ICFR) were observed to be operating effectively.\n\n' +
-        '• Consolidated Operating Margin: 34.2%\n' +
-        '• Free Cash Flow Generation: $84.2M\n' +
-        '• Bad Debt Provisions: <0.2% of gross revenues',
-        {
-          x: 40,
-          y: height - 150,
-          size: 11,
-          font: font,
-          color: rgb(0.15, 0.18, 0.25),
-          lineHeight: 18,
-        }
-      );
-    } else if (i === 3) {
-      page.drawText('Cybersecurity, Privacy & Data Governance', {
-        x: 40,
-        y: height - 110,
-        size: 18,
-        font: boldFont,
-        color: rgb(0.08, 0.12, 0.2),
-      });
-
-      page.drawText(
-        'Auditors confirmed strict compliance with GDPR, CCPA, and HIPAA privacy rules.\n' +
-        'Customer document access logs are signed cryptographically with non-repudiation seals.\n' +
-        'Disaster recovery exercises achieved RTO < 15 minutes and RPO = 0.',
-        {
-          x: 40,
-          y: height - 150,
-          size: 11,
-          font: font,
-          color: rgb(0.15, 0.18, 0.25),
-          lineHeight: 18,
-        }
-      );
-    } else {
-      page.drawText('Formal Auditor Opinion & Signature Panel', {
-        x: 40,
-        y: height - 110,
-        size: 18,
-        font: boldFont,
-        color: rgb(0.08, 0.12, 0.2),
-      });
-
-      page.drawText(
-        'In our opinion, the consolidated financial statements present fairly, in all material respects,\n' +
-        'the financial position of the Enterprise as of December 31, 2025, in conformity with U.S. GAAP.\n\n' +
-        'Audit Partner: Katherine Hall, CPA\n' +
-        'Firm: Hall, Morgan & Sterling LLP\n' +
-        'Date: September 20, 2026',
-        {
-          x: 40,
-          y: height - 150,
-          size: 11,
-          font: font,
-          color: rgb(0.15, 0.18, 0.25),
-          lineHeight: 18,
-        }
-      );
-    }
+    page.drawText(sec.body, {
+      x: 40,
+      y: height - 150,
+      size: 11,
+      font: font,
+      color: rgb(0.15, 0.18, 0.25),
+      lineHeight: 20,
+    });
   }
 
   return await pdfDoc.save();

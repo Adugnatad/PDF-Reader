@@ -20,6 +20,7 @@ import {
   StatusBar,
   Animated,
   BackHandler,
+  Linking,
 } from "react-native";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import * as ScreenOrientation from "expo-screen-orientation";
@@ -434,6 +435,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
 
   // Continuous page canvas refs
   const continuousCanvases = useRef<Map<number, any>>(new Map());
+  const [continuousLinks, setContinuousLinks] = useState<Record<number, any[]>>({});
 
   // Synchronize internal active document state when docId or docTitle props change
   useEffect(() => {
@@ -770,6 +772,71 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
             ctx.scale(pixelRatio, pixelRatio);
             await page.render({ canvasContext: ctx, viewport }).promise;
           }
+
+          // Extract link annotations for continuous page
+          try {
+            const rawAnnots = await page.getAnnotations();
+            const pageLinks: any[] = [];
+            for (let i = 0; i < (rawAnnots || []).length; i++) {
+              const annot = rawAnnots[i];
+              if (annot.subtype !== "Link" || !annot.rect) continue;
+              const bounds = viewport.convertToViewportRectangle(annot.rect);
+              const left = Math.min(bounds[0], bounds[2]);
+              const top = Math.min(bounds[1], bounds[3]);
+              const width = Math.max(4, Math.abs(bounds[0] - bounds[2]));
+              const height = Math.max(4, Math.abs(bounds[1] - bounds[3]));
+              const leftPct = (left / viewport.width) * 100;
+              const topPct = (top / viewport.height) * 100;
+              const widthPct = (width / viewport.width) * 100;
+              const heightPct = (height / viewport.height) * 100;
+
+              let targetPage: number | undefined;
+              let url: string | undefined;
+              if (annot.url) url = annot.url;
+              else if (annot.unsafeUrl) url = annot.unsafeUrl;
+              else if (annot.action === "URI" && annot.uri) url = annot.uri;
+
+              if (!url && annot.dest) {
+                try {
+                  let explicitDest = annot.dest;
+                  if (typeof explicitDest === "string") {
+                    explicitDest = await pdfDoc.getDestination(explicitDest);
+                    if (!explicitDest) {
+                      const m = annot.dest.match(/(?:page=|#page=|#|)(\d+)/i);
+                      if (m && m[1]) {
+                        const parsed = parseInt(m[1], 10);
+                        if (parsed >= 1 && parsed <= numPages) targetPage = parsed;
+                      }
+                    }
+                  }
+                  if (explicitDest && !targetPage) {
+                    const pageRef = Array.isArray(explicitDest) ? explicitDest[0] : explicitDest;
+                    if (pageRef && typeof pageRef === "object" && ("num" in pageRef || "gen" in pageRef)) {
+                      const pIdx = await pdfDoc.getPageIndex(pageRef);
+                      if (typeof pIdx === "number" && pIdx >= 0) targetPage = pIdx + 1;
+                    } else if (typeof pageRef === "number") {
+                      targetPage = pageRef >= 0 && pageRef < numPages ? pageRef + 1 : pageRef;
+                    }
+                  }
+                } catch {}
+              }
+
+              if (targetPage !== undefined || url !== undefined) {
+                pageLinks.push({
+                  id: `c-link-${p}-${i}`,
+                  leftPct,
+                  topPct,
+                  widthPct,
+                  heightPct,
+                  targetPage,
+                  url,
+                });
+              }
+            }
+            if (isMounted && pageLinks.length > 0) {
+              setContinuousLinks((prev) => ({ ...prev, [p]: pageLinks }));
+            }
+          } catch {}
         } catch {
           // ignore individual continuous render cancel
         }
@@ -830,6 +897,72 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
       triggerPageInteraction();
     },
     [numPages, viewMode, triggerPageInteraction]
+  );
+
+  // Table of Contents (TOC) and Link Annotation Navigation Handler
+  // Works on both native devices (via react-native-pdf onPressLink) and web
+  const handleLinkPress = useCallback(
+    (uri: string) => {
+      if (!uri) return;
+
+      // 1. External URL links (http, https, mailto, tel)
+      const lower = uri.toLowerCase().trim();
+      if (
+        lower.startsWith("http://") ||
+        lower.startsWith("https://") ||
+        lower.startsWith("mailto:") ||
+        lower.startsWith("tel:")
+      ) {
+        if (Platform.OS === "web") {
+          try {
+            window.open(uri, "_blank", "noopener,noreferrer");
+          } catch {
+            Linking.openURL(uri).catch(() => {});
+          }
+        } else {
+          Linking.canOpenURL(uri)
+            .then((supported) => {
+              if (supported) {
+                Linking.openURL(uri).catch(() => {
+                  onShowToast(`Could not open ${uri}`);
+                });
+              } else {
+                onShowToast(`Cannot open link: ${uri}`);
+              }
+            })
+            .catch(() => {
+              onShowToast(`Cannot open link: ${uri}`);
+            });
+        }
+        return;
+      }
+
+      // 2. Internal Page Destination Links (TOC, page anchors)
+      // Supports formats: "3", "#3", "page=3", "#page=3", "page:3", "p=3", "pdf://page/3", etc.
+      let targetPage: number | null = null;
+      const match = uri.match(/(?:page=|#page=|#|page:|\bp=|\bp|^)(\d+)/i);
+      if (match && match[1]) {
+        const p = parseInt(match[1], 10);
+        if (!isNaN(p) && p >= 1 && p <= (numPages || 9999)) {
+          targetPage = p;
+        }
+      } else {
+        const direct = parseInt(uri.trim(), 10);
+        if (!isNaN(direct) && direct >= 1 && direct <= (numPages || 9999)) {
+          targetPage = direct;
+        }
+      }
+
+      if (targetPage !== null) {
+        // Jump to target page using the exact same navigation method page scrubber and controls use
+        handleSelectPage(targetPage);
+      } else {
+        // Fail gracefully with no crash or silent freeze if destination can't be resolved
+        console.warn("Unresolved PDF link destination:", uri);
+        onShowToast("Unable to resolve link destination");
+      }
+    },
+    [numPages, handleSelectPage, onShowToast]
   );
 
   // Sync current page smoothly when viewMode switches between single and continuous
@@ -1243,7 +1376,30 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                 scrollEnabled:
                   reflow ||
                   (Platform.OS === "web" && viewMode === "continuous"),
-                onScroll: triggerPageInteraction,
+                onScroll: (e: any) => {
+                  triggerPageInteraction();
+                  if (
+                    viewMode === "continuous" &&
+                    readingDirection !== "horizontal" &&
+                    numPages > 1
+                  ) {
+                    const scrollY = e?.nativeEvent?.contentOffset?.y || 0;
+                    const contentH =
+                      (e?.nativeEvent?.contentSize?.height || 0) -
+                      (e?.nativeEvent?.layoutMeasurement?.height || 0);
+                    if (contentH > 10) {
+                      const fraction = Math.max(
+                        0,
+                        Math.min(1, scrollY / contentH)
+                      );
+                      const calcPage =
+                        Math.round(fraction * (numPages - 1)) + 1;
+                      setCurrentPage((prev) =>
+                        prev !== calcPage ? calcPage : prev
+                      );
+                    }
+                  }
+                },
                 scrollEventThrottle: 16,
               };
 
@@ -1431,6 +1587,7 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                       horizontal={readingDirection === "horizontal"}
                       onPageSingleTap={handleSingleTap}
                       onScaleChanged={handleScaleChanged}
+                      onPressLink={handleLinkPress}
                       onLoadComplete={(loadedPages) => {
                         setNumPages(loadedPages);
                         setIsLoading(false);
@@ -1609,13 +1766,84 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                     }}
                   >
                     {Platform.OS === "web" ? (
-                      <canvas
-                        ref={(el) => {
-                          if (el) continuousCanvases.current.set(p, el);
-                          else continuousCanvases.current.delete(p);
+                      <div
+                        style={{
+                          position: "relative",
+                          display: "inline-block",
+                          maxWidth: "100%",
                         }}
-                        style={{ display: "block", maxWidth: "100%" }}
-                      />
+                      >
+                        <canvas
+                          ref={(el) => {
+                            if (el) continuousCanvases.current.set(p, el);
+                            else continuousCanvases.current.delete(p);
+                          }}
+                          style={{ display: "block", maxWidth: "100%" }}
+                        />
+                        {continuousLinks[p] && continuousLinks[p].length > 0 && (
+                          <div
+                            style={{
+                              position: "absolute",
+                              top: 0,
+                              left: 0,
+                              width: "100%",
+                              height: "100%",
+                              pointerEvents: "none",
+                              overflow: "hidden",
+                            }}
+                          >
+                            {continuousLinks[p].map((link) => (
+                              <a
+                                key={link.id}
+                                href={
+                                  link.url ||
+                                  (link.targetPage
+                                    ? `#page=${link.targetPage}`
+                                    : "#")
+                                }
+                                title={
+                                  link.url
+                                    ? `Open link: ${link.url}`
+                                    : link.targetPage
+                                    ? `Jump to Page ${link.targetPage}`
+                                    : "Link"
+                                }
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  if (link.targetPage) {
+                                    handleSelectPage(link.targetPage);
+                                  } else if (link.url) {
+                                    handleLinkPress(link.url);
+                                  }
+                                }}
+                                style={{
+                                  position: "absolute",
+                                  left: `${link.leftPct}%`,
+                                  top: `${link.topPct}%`,
+                                  width: `${link.widthPct}%`,
+                                  height: `${link.heightPct}%`,
+                                  pointerEvents: "auto",
+                                  cursor: "pointer",
+                                  backgroundColor: "rgba(59, 130, 246, 0.04)",
+                                  borderRadius: 2,
+                                  outline: "none",
+                                  display: "block",
+                                  transition: "background-color 0.15s ease",
+                                }}
+                                onMouseEnter={(e) => {
+                                  e.currentTarget.style.backgroundColor =
+                                    "rgba(59, 130, 246, 0.16)";
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.backgroundColor =
+                                    "rgba(59, 130, 246, 0.04)";
+                                }}
+                              />
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     ) : (
                       <View style={styles.nativePdfFallbackCard}>
                         <Ionicons
@@ -1667,13 +1895,84 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                     }}
                   >
                     {Platform.OS === "web" ? (
-                      <canvas
-                        ref={(el) => {
-                          if (el) continuousCanvases.current.set(p, el);
-                          else continuousCanvases.current.delete(p);
+                      <div
+                        style={{
+                          position: "relative",
+                          display: "inline-block",
+                          maxWidth: "100%",
                         }}
-                        style={{ display: "block", maxWidth: "100%" }}
-                      />
+                      >
+                        <canvas
+                          ref={(el) => {
+                            if (el) continuousCanvases.current.set(p, el);
+                            else continuousCanvases.current.delete(p);
+                          }}
+                          style={{ display: "block", maxWidth: "100%" }}
+                        />
+                        {continuousLinks[p] && continuousLinks[p].length > 0 && (
+                          <div
+                            style={{
+                              position: "absolute",
+                              top: 0,
+                              left: 0,
+                              width: "100%",
+                              height: "100%",
+                              pointerEvents: "none",
+                              overflow: "hidden",
+                            }}
+                          >
+                            {continuousLinks[p].map((link) => (
+                              <a
+                                key={link.id}
+                                href={
+                                  link.url ||
+                                  (link.targetPage
+                                    ? `#page=${link.targetPage}`
+                                    : "#")
+                                }
+                                title={
+                                  link.url
+                                    ? `Open link: ${link.url}`
+                                    : link.targetPage
+                                    ? `Jump to Page ${link.targetPage}`
+                                    : "Link"
+                                }
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  if (link.targetPage) {
+                                    handleSelectPage(link.targetPage);
+                                  } else if (link.url) {
+                                    handleLinkPress(link.url);
+                                  }
+                                }}
+                                style={{
+                                  position: "absolute",
+                                  left: `${link.leftPct}%`,
+                                  top: `${link.topPct}%`,
+                                  width: `${link.widthPct}%`,
+                                  height: `${link.heightPct}%`,
+                                  pointerEvents: "auto",
+                                  cursor: "pointer",
+                                  backgroundColor: "rgba(59, 130, 246, 0.04)",
+                                  borderRadius: 2,
+                                  outline: "none",
+                                  display: "block",
+                                  transition: "background-color 0.15s ease",
+                                }}
+                                onMouseEnter={(e) => {
+                                  e.currentTarget.style.backgroundColor =
+                                    "rgba(59, 130, 246, 0.16)";
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.backgroundColor =
+                                    "rgba(59, 130, 246, 0.04)";
+                                }}
+                              />
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     ) : (
                       <View style={styles.nativePdfFallbackCard}>
                         <Ionicons
@@ -2068,7 +2367,12 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
         }
         theme={theme}
         thumbnails={thumbnails}
-        visible={!isLoading && !loadError && numPages > 1}
+        visible={
+          !isLoading &&
+          !loadError &&
+          numPages > 1 &&
+          (viewMode === "single" || readingDirection !== "horizontal")
+        }
         docTitle={activeTitle}
       />
 

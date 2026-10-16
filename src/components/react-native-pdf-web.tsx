@@ -74,9 +74,21 @@ const Pdf = forwardRef<any, PdfProps>((props, forwardedRef) => {
     onError,
     onPageSingleTap,
     renderActivityIndicator,
+    onPressLink,
   } = props;
 
+  interface PageLinkItem {
+    id: string;
+    leftPct: number;
+    topPct: number;
+    widthPct: number;
+    heightPct: number;
+    targetPage?: number;
+    url?: string;
+  }
+
   const [activePage, setActivePage] = useState<number>(propPage || 1);
+  const [pageLinks, setPageLinks] = useState<PageLinkItem[]>([]);
   const localCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const currentRenderTask = useRef<any>(null);
   const [loading, setLoading] = useState(true);
@@ -216,6 +228,93 @@ const Pdf = forwardRef<any, PdfProps>((props, forwardedRef) => {
           ctx.drawImage(offscreen, 0, 0);
         }
 
+        // Extract and resolve Table of Contents (TOC) and Link Annotations
+        try {
+          const rawAnnots = await pageObj.getAnnotations();
+          const linksList: PageLinkItem[] = [];
+
+          for (let i = 0; i < (rawAnnots || []).length; i++) {
+            const annot = rawAnnots[i];
+            if (annot.subtype !== 'Link' || !annot.rect) continue;
+
+            // Convert PDF rect [x1, y1, x2, y2] to viewport coordinates
+            const bounds = viewport.convertToViewportRectangle(annot.rect);
+            const left = Math.min(bounds[0], bounds[2]);
+            const top = Math.min(bounds[1], bounds[3]);
+            const width = Math.max(4, Math.abs(bounds[0] - bounds[2]));
+            const height = Math.max(4, Math.abs(bounds[1] - bounds[3]));
+
+            const leftPct = (left / viewport.width) * 100;
+            const topPct = (top / viewport.height) * 100;
+            const widthPct = (width / viewport.width) * 100;
+            const heightPct = (height / viewport.height) * 100;
+
+            let targetPage: number | undefined;
+            let url: string | undefined;
+
+            // 1. External URL
+            if (annot.url) {
+              url = annot.url;
+            } else if (annot.unsafeUrl) {
+              url = annot.unsafeUrl;
+            } else if (annot.action === 'URI' && annot.uri) {
+              url = annot.uri;
+            }
+
+            // 2. Internal Link Destination (e.g. TOC jump)
+            if (!url && annot.dest) {
+              try {
+                let explicitDest = annot.dest;
+                if (typeof explicitDest === 'string') {
+                  explicitDest = await doc.getDestination(explicitDest);
+                  if (!explicitDest) {
+                    const m = annot.dest.match(/(?:page=|#page=|#|)(\d+)/i);
+                    if (m && m[1]) {
+                      const p = parseInt(m[1], 10);
+                      if (p >= 1 && p <= doc.numPages) targetPage = p;
+                    }
+                  }
+                }
+
+                if (explicitDest && !targetPage) {
+                  const pageRef = Array.isArray(explicitDest) ? explicitDest[0] : explicitDest;
+                  if (pageRef && typeof pageRef === 'object' && ('num' in pageRef || 'gen' in pageRef)) {
+                    const pageIndex = await doc.getPageIndex(pageRef);
+                    if (typeof pageIndex === 'number' && pageIndex >= 0) {
+                      targetPage = pageIndex + 1;
+                    }
+                  } else if (typeof pageRef === 'number') {
+                    targetPage = pageRef >= 0 && pageRef < doc.numPages ? pageRef + 1 : pageRef;
+                  }
+                }
+              } catch (destErr) {
+                console.warn('Destination resolution error:', destErr);
+              }
+            }
+
+            if (targetPage !== undefined || url !== undefined) {
+              linksList.push({
+                id: `link-${targetPage || 'url'}-${i}-${annot.id || i}`,
+                leftPct,
+                topPct,
+                widthPct,
+                heightPct,
+                targetPage,
+                url,
+              });
+            }
+          }
+
+          if (!isCancelled) {
+            setPageLinks(linksList);
+          }
+        } catch (annotErr) {
+          console.warn('Could not read PDF annotations:', annotErr);
+          if (!isCancelled) {
+            setPageLinks([]);
+          }
+        }
+
         if (onPageChanged) {
           onPageChanged(targetPage, doc.numPages);
         }
@@ -233,6 +332,32 @@ const Pdf = forwardRef<any, PdfProps>((props, forwardedRef) => {
       }
     };
   }, [doc, activePage, scale, rotation, containerWidth, fitPolicy]);
+
+  const handleLinkPressInternal = (link: PageLinkItem, e: any) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (link.targetPage) {
+      if (onPressLink) {
+        onPressLink(String(link.targetPage));
+      } else {
+        setActivePage(link.targetPage);
+        if (onPageChanged && doc) {
+          onPageChanged(link.targetPage, doc.numPages);
+        }
+      }
+    } else if (link.url) {
+      if (onPressLink) {
+        onPressLink(link.url);
+      } else {
+        try {
+          window.open(link.url, '_blank', 'noopener,noreferrer');
+        } catch {
+          // ignore
+        }
+      }
+    }
+  };
 
   return (
     <View
@@ -253,24 +378,82 @@ const Pdf = forwardRef<any, PdfProps>((props, forwardedRef) => {
           )}
         </View>
       )}
-      <canvas
-        ref={localCanvasRef}
-        onClick={(e) => {
-          if (onPageSingleTap) {
-            const rect = (e.currentTarget as HTMLCanvasElement).getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
-            onPageSingleTap(activePage, x, y);
-          }
-        }}
+      <div
         style={{
-          display: loading ? 'none' : 'block',
+          position: 'relative',
           width: '100%',
-          height: 'auto',
-          maxWidth: '100%',
-          cursor: 'pointer',
+          display: loading ? 'none' : 'block',
         }}
-      />
+      >
+        <canvas
+          ref={localCanvasRef}
+          onClick={(e) => {
+            if (onPageSingleTap) {
+              const rect = (e.currentTarget as HTMLCanvasElement).getBoundingClientRect();
+              const x = e.clientX - rect.left;
+              const y = e.clientY - rect.top;
+              onPageSingleTap(activePage, x, y);
+            }
+          }}
+          style={{
+            display: 'block',
+            width: '100%',
+            height: 'auto',
+            maxWidth: '100%',
+            cursor: 'default',
+          }}
+        />
+
+        {/* Clickable TOC and Link Annotations Layer */}
+        {pageLinks.length > 0 && (
+          <div
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: '100%',
+              pointerEvents: 'none',
+              overflow: 'hidden',
+            }}
+          >
+            {pageLinks.map((link) => (
+              <a
+                key={link.id}
+                href={link.url || (link.targetPage ? `#page=${link.targetPage}` : '#')}
+                title={
+                  link.url
+                    ? `Open link: ${link.url}`
+                    : link.targetPage
+                    ? `Jump to Page ${link.targetPage}`
+                    : 'PDF Link'
+                }
+                onClick={(e) => handleLinkPressInternal(link, e)}
+                style={{
+                  position: 'absolute',
+                  left: `${link.leftPct}%`,
+                  top: `${link.topPct}%`,
+                  width: `${link.widthPct}%`,
+                  height: `${link.heightPct}%`,
+                  pointerEvents: 'auto',
+                  cursor: 'pointer',
+                  backgroundColor: 'rgba(59, 130, 246, 0.04)',
+                  borderRadius: 2,
+                  outline: 'none',
+                  display: 'block',
+                  transition: 'background-color 0.15s ease',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = 'rgba(59, 130, 246, 0.16)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'rgba(59, 130, 246, 0.04)';
+                }}
+              />
+            ))}
+          </div>
+        )}
+      </div>
     </View>
   );
 });
