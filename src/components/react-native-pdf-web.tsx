@@ -91,6 +91,7 @@ const Pdf = forwardRef<any, PdfProps>((props, forwardedRef) => {
   const [pageLinks, setPageLinks] = useState<PageLinkItem[]>([]);
   const localCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const currentRenderTask = useRef<any>(null);
+  const pageBufferCache = useRef<Map<string, HTMLCanvasElement>>(new Map());
   const [loading, setLoading] = useState(true);
   const [doc, setDoc] = useState<any>(null);
   const [containerWidth, setContainerWidth] = useState<number>(0);
@@ -200,6 +201,21 @@ const Pdf = forwardRef<any, PdfProps>((props, forwardedRef) => {
         const targetWidth = Math.floor(viewport.width * pixelRatio);
         const targetHeight = Math.floor(viewport.height * pixelRatio);
 
+        const cacheKey = `${targetPage}-${targetWidth}-${targetHeight}-${rotation}`;
+        const cached = pageBufferCache.current.get(cacheKey);
+
+        // Instantaneous display from memory cache if available (0ms blink-free transition)
+        if (cached) {
+          if (canvas.width !== targetWidth) canvas.width = targetWidth;
+          if (canvas.height !== targetHeight) canvas.height = targetHeight;
+          if (canvas.style.width !== '100%') canvas.style.width = '100%';
+          if (canvas.style.height !== 'auto') canvas.style.height = 'auto';
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(cached, 0, 0);
+          }
+        }
+
         // Flicker-free double buffering: Render onto an offscreen canvas
         const offscreen = document.createElement('canvas');
         offscreen.width = targetWidth;
@@ -217,11 +233,18 @@ const Pdf = forwardRef<any, PdfProps>((props, forwardedRef) => {
         await renderTask.promise;
         if (isCancelled) return;
 
+        // Save to cache
+        pageBufferCache.current.set(cacheKey, offscreen);
+        if (pageBufferCache.current.size > 12) {
+          const firstKey = pageBufferCache.current.keys().next().value;
+          if (firstKey) pageBufferCache.current.delete(firstKey);
+        }
+
         // Atomically copy the rendered offscreen buffer to the visible canvas in a single frame
-        canvas.width = targetWidth;
-        canvas.height = targetHeight;
-        canvas.style.width = '100%';
-        canvas.style.height = 'auto';
+        if (canvas.width !== targetWidth) canvas.width = targetWidth;
+        if (canvas.height !== targetHeight) canvas.height = targetHeight;
+        if (canvas.style.width !== '100%') canvas.style.width = '100%';
+        if (canvas.style.height !== 'auto') canvas.style.height = 'auto';
 
         const ctx = canvas.getContext('2d');
         if (ctx) {

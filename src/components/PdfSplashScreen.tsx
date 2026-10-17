@@ -1,6 +1,7 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Animated,
+  Dimensions,
   Easing,
   Platform,
   StatusBar,
@@ -18,38 +19,72 @@ export interface PdfSplashScreenProps {
 export const PdfSplashScreen: React.FC<PdfSplashScreenProps> = ({
   visible,
   fadeAnim,
-  progressAnim,
 }) => {
   const moveAnim = useRef(new Animated.Value(0)).current;
+  const animInstanceRef = useRef<Animated.CompositeAnimation | null>(null);
 
+  // Track layout width to calculate pixel-precise travel distance for native driver translateX
+  const [trackWidth, setTrackWidth] = useState<number>(() => {
+    return Dimensions.get('window').width || 360;
+  });
+
+  const barWidth = Math.round(trackWidth * 0.32);
+  const maxTranslateX = Math.max(1, trackWidth - barWidth);
+
+  // Start continuous back-and-forth loop on the native driver thread
   useEffect(() => {
-    if (!visible) return;
+    if (!visible) {
+      if (animInstanceRef.current) {
+        animInstanceRef.current.stop();
+        animInstanceRef.current = null;
+      }
+      return;
+    }
 
+    // Stop any previous instance before initiating
+    if (animInstanceRef.current) {
+      animInstanceRef.current.stop();
+    }
+
+    moveAnim.setValue(0);
+
+    // Single reliable repeating loop with reverse sequence
+    // Uses native driver on native devices so startup JS tasks don't block 60fps movement
+    const isNative = Platform.OS !== 'web';
     const animation = Animated.loop(
       Animated.sequence([
         Animated.timing(moveAnim, {
           toValue: 1,
-          duration: 1100,
+          duration: 1150,
           easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
+          useNativeDriver: isNative,
         }),
         Animated.timing(moveAnim, {
           toValue: 0,
-          duration: 1100,
+          duration: 1150,
           easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
+          useNativeDriver: isNative,
         }),
-      ])
+      ]),
+      { iterations: -1 }
     );
 
+    animInstanceRef.current = animation;
     animation.start();
 
     return () => {
       animation.stop();
+      animInstanceRef.current = null;
     };
   }, [visible, moveAnim]);
 
   if (!visible) return null;
+
+  // Numeric interpolation for translateX (required by native driver, avoids layout engine)
+  const translateX = moveAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, maxTranslateX],
+  });
 
   return (
     <Animated.View
@@ -132,16 +167,22 @@ export const PdfSplashScreen: React.FC<PdfSplashScreenProps> = ({
         </Text>
       </View>
 
-      {/* Bottom Edge Animated Loading Bar (Moving Back and Forth) */}
-      <View style={styles.progressTrack}>
+      {/* Bottom Edge Animated Loading Bar (Moving Back and Forth on Native Thread) */}
+      <View
+        style={styles.progressTrack}
+        onLayout={(e) => {
+          const w = e.nativeEvent.layout.width;
+          if (w > 0 && Math.abs(w - trackWidth) > 2) {
+            setTrackWidth(w);
+          }
+        }}
+      >
         <Animated.View
           style={[
             styles.animatedBar,
             {
-              left: moveAnim.interpolate({
-                inputRange: [0, 1],
-                outputRange: ['0%', '70%'],
-              }),
+              width: barWidth,
+              transform: [{ translateX }],
             },
           ]}
         />
@@ -240,7 +281,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 0,
     bottom: 0,
-    width: '30%',
+    left: 0,
     backgroundColor: '#E5252A',
     borderRadius: 3,
   },

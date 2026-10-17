@@ -21,6 +21,7 @@ import {
   openAllFilesAccessSettings,
 } from "../services/nativeFilePicker";
 import { isUuidOrHash, resolvePdfDisplayName } from "../utils/pdfNameResolver";
+import { FilePermissionPromptModal } from "./FilePermissionPromptModal";
 
 interface FilesHomeScreenProps {
   files: DocFile[];
@@ -48,6 +49,52 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
   const [editingFileId, setEditingFileId] = useState<string | null>(null);
   const [editingFileName, setEditingFileName] = useState("");
   const accessSettingsOpenedRef = React.useRef(false);
+
+  // Redesigned in-app permission prompt state
+  const [showPermissionPrompt, setShowPermissionPrompt] = useState<boolean>(() => {
+    if (typeof window !== "undefined" && window.sessionStorage) {
+      if (sessionStorage.getItem("docuflow_permission_prompt_session_done") === "true") {
+        return false;
+      }
+    }
+    return true;
+  });
+
+  const handleAllowPermission = async () => {
+    setShowPermissionPrompt(false);
+    if (typeof window !== "undefined") {
+      try {
+        sessionStorage.setItem("docuflow_permission_prompt_session_done", "true");
+        localStorage.setItem("docuflow_file_access_granted", "true");
+      } catch {}
+    }
+    onShowToast("File access granted! Scanning for documents...");
+    setIsScanning(true);
+    try {
+      if (Platform.OS === "android") {
+        await openAllFilesAccessSettings().catch((e) =>
+          console.warn("Could not open settings:", e)
+        );
+      }
+      await pdfStore.scanDeviceOnceAfterPermission();
+      setDeviceFiles(pdfStore.getAllFiles());
+      onShowToast("Device scan complete!");
+    } catch (e) {
+      console.warn("Scan error after permission:", e);
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
+  const handleLaterPermission = () => {
+    setShowPermissionPrompt(false);
+    if (typeof window !== "undefined" && window.sessionStorage) {
+      try {
+        sessionStorage.setItem("docuflow_permission_prompt_session_done", "true");
+      } catch {}
+    }
+    onShowToast("You can grant file access anytime from the Permission button.");
+  };
 
   // Sync with prop changes
   React.useEffect(() => {
@@ -91,24 +138,7 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
       if (accessSettingsOpenedRef.current || (await hasAllFilesAccess()))
         return;
       accessSettingsOpenedRef.current = true;
-      Alert.alert(
-        "Allow access to your files",
-        "DocuFlow needs all-files access to find PDFs stored on your device. You can allow it on the next screen.",
-        [
-          { text: "Not now", style: "cancel" },
-          {
-            text: "Continue",
-            onPress: () => {
-              openAllFilesAccessSettings().catch((error) => {
-                console.warn(
-                  "Could not open all-files access settings:",
-                  error,
-                );
-              });
-            },
-          },
-        ],
-      );
+      setShowPermissionPrompt(true);
     };
 
     scanOnceIfAccessGranted().catch((error) => {
@@ -352,6 +382,20 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
 
             {/* Header Quick Actions */}
             <View style={styles.headerActions}>
+              <TouchableOpacity
+                style={styles.permissionBadgeBtn}
+                onPress={() => setShowPermissionPrompt(true)}
+                activeOpacity={0.75}
+                accessibilityLabel="File Access Permission"
+              >
+                <Ionicons
+                  name="shield-checkmark"
+                  size={14}
+                  color="#ff516a"
+                />
+                <Text style={styles.permissionBadgeBtnText}>Permission</Text>
+              </TouchableOpacity>
+
               <TouchableOpacity
                 style={styles.scanBtn}
                 onPress={handleScanDeviceStorage}
@@ -827,6 +871,14 @@ export const FilesHomeScreen: React.FC<FilesHomeScreenProps> = ({
           </Text>
         </TouchableOpacity>
       </View>
+
+      {/* Redesigned In-App File Access Permission Prompt matching reference design */}
+      <FilePermissionPromptModal
+        visible={showPermissionPrompt}
+        onAllow={handleAllowPermission}
+        onLater={handleLaterPermission}
+        appName="All PDF Reader"
+      />
     </View>
   );
 };
@@ -928,6 +980,22 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
     width: "100%",
     gap: 8,
+  },
+  permissionBadgeBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "rgba(230, 28, 56, 0.12)",
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "rgba(230, 28, 56, 0.35)",
+  },
+  permissionBadgeBtnText: {
+    color: "#ff516a",
+    fontSize: 11,
+    fontWeight: "700",
   },
   scanBtn: {
     flexDirection: "row",

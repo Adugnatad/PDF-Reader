@@ -322,15 +322,18 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
   const pillOpacity = useRef(new Animated.Value(0)).current;
   const pillTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const lastInteractionTime = useRef<number>(0);
   const triggerPageInteraction = useCallback(() => {
+    const now = Date.now();
+    if (now - lastInteractionTime.current < 200) {
+      return;
+    }
+    lastInteractionTime.current = now;
+
     if (pillTimerRef.current) {
       clearTimeout(pillTimerRef.current);
     }
-    Animated.timing(pillOpacity, {
-      toValue: 1,
-      duration: 160,
-      useNativeDriver: Platform.OS !== "web",
-    }).start();
+    pillOpacity.setValue(1);
 
     pillTimerRef.current = setTimeout(() => {
       Animated.timing(pillOpacity, {
@@ -436,6 +439,8 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
   // Continuous page canvas refs
   const continuousCanvases = useRef<Map<number, any>>(new Map());
   const [continuousLinks, setContinuousLinks] = useState<Record<number, any[]>>({});
+  const currentCalculatedPageRef = useRef<number>(1);
+  const scrollPageThrottleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Synchronize internal active document state when docId or docTitle props change
   useEffect(() => {
@@ -732,8 +737,10 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
     const dpr = (typeof window !== "undefined" && window.devicePixelRatio) || 1;
 
     if (width > 0 && height > 0) {
-      drawCanvas.width = Math.floor(width * dpr);
-      drawCanvas.height = Math.floor(height * dpr);
+      const targetW = Math.floor(width * dpr);
+      const targetH = Math.floor(height * dpr);
+      if (drawCanvas.width !== targetW) drawCanvas.width = targetW;
+      if (drawCanvas.height !== targetH) drawCanvas.height = targetH;
       drawCanvas.style.width = `${width}px`;
       drawCanvas.style.height = `${height}px`;
       const ctx = drawCanvas.getContext("2d");
@@ -741,36 +748,51 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
         ctx.scale(dpr, dpr);
       }
     }
-  }, [currentPage, zoom, rotation, viewMode]);
+  }, [zoom, rotation, viewMode]);
 
-  // 5. Render Continuous Scroll Pages
+  // 5. Render Continuous Scroll Pages (Flicker-Free Double Buffered)
   useEffect(() => {
     if (!pdfDoc || viewMode !== "continuous") return;
 
     let isMounted = true;
     async function renderAllContinuousPages() {
+      const allLinks: Record<number, any[]> = {};
+
       for (let p = 1; p <= numPages; p++) {
         const c = continuousCanvases.current.get(p);
         if (!c) continue;
 
         try {
           const page = await pdfDoc.getPage(p);
-          if (!page) continue;
+          if (!page || !isMounted) continue;
           const viewport = page?.getViewport ? page.getViewport({ scale: zoom * 0.9, rotation }) : null;
           if (!viewport || typeof viewport.width !== "number" || typeof viewport.height !== "number") continue;
           const pixelRatio =
             (typeof window !== "undefined" && window.devicePixelRatio) || 1;
 
-          c.width = Math.floor(viewport.width * pixelRatio);
-          c.height = Math.floor(viewport.height * pixelRatio);
+          const targetW = Math.floor(viewport.width * pixelRatio);
+          const targetH = Math.floor(viewport.height * pixelRatio);
+
+          // Zero-flicker double buffering: render to offscreen buffer first
+          const offscreen = document.createElement("canvas");
+          offscreen.width = targetW;
+          offscreen.height = targetH;
+          const offCtx = offscreen.getContext("2d");
+          if (!offCtx) continue;
+
+          offCtx.scale(pixelRatio, pixelRatio);
+          await page.render({ canvasContext: offCtx, viewport }).promise;
+          if (!isMounted) return;
+
+          // Atomically copy to visible canvas with 0 blank frames
+          if (c.width !== targetW) c.width = targetW;
+          if (c.height !== targetH) c.height = targetH;
           c.style.width = `${Math.floor(viewport.width)}px`;
           c.style.height = `${Math.floor(viewport.height)}px`;
 
           const ctx = c.getContext("2d");
           if (ctx) {
-            ctx.save();
-            ctx.scale(pixelRatio, pixelRatio);
-            await page.render({ canvasContext: ctx, viewport }).promise;
+            ctx.drawImage(offscreen, 0, 0);
           }
 
           // Extract link annotations for continuous page
@@ -833,13 +855,17 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                 });
               }
             }
-            if (isMounted && pageLinks.length > 0) {
-              setContinuousLinks((prev) => ({ ...prev, [p]: pageLinks }));
+            if (pageLinks.length > 0) {
+              allLinks[p] = pageLinks;
             }
           } catch {}
         } catch {
           // ignore individual continuous render cancel
         }
+      }
+
+      if (isMounted && Object.keys(allLinks).length > 0) {
+        setContinuousLinks(allLinks);
       }
     }
 
@@ -1394,13 +1420,19 @@ export const PdfReaderScreen: React.FC<PdfReaderScreenProps> = ({
                       );
                       const calcPage =
                         Math.round(fraction * (numPages - 1)) + 1;
-                      setCurrentPage((prev) =>
-                        prev !== calcPage ? calcPage : prev
-                      );
+                      if (calcPage !== currentCalculatedPageRef.current) {
+                        currentCalculatedPageRef.current = calcPage;
+                        if (!scrollPageThrottleTimer.current) {
+                          scrollPageThrottleTimer.current = setTimeout(() => {
+                            scrollPageThrottleTimer.current = null;
+                            setCurrentPage(currentCalculatedPageRef.current);
+                          }, 100);
+                        }
+                      }
                     }
                   }
                 },
-                scrollEventThrottle: 16,
+                scrollEventThrottle: 32,
               };
 
         return (

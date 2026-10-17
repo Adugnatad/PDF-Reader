@@ -134,7 +134,7 @@ export const PdfSideScrubber: React.FC<PdfSideScrubberProps> = ({
         scrubThrottleTimer.current = setTimeout(() => {
           scrubThrottleTimer.current = null;
           onPageChange(pendingPageRef.current);
-        }, 16); // ~60fps responsive scrollbar updates
+        }, 100); // Smooth non-blocking document updates
       }
     },
     [onPageChange, triggerHaptic],
